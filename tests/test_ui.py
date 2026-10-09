@@ -556,6 +556,7 @@ executable = {q(str(self.codex_exe))}
         # /project com pedido, das notas: vai ao Claude com a skill; a resposta propõe arquivos.
         self.hud.type("/project crie o Beta DOCPROPOSTA")
         self.hud.wait_for("2 CLAUDE ●")
+        self.hud.wait_for(lambda s: self.calls(self.claude_log), what="pergunta registrada pelo Claude falso")
         call = self.calls(self.claude_log)[-1]
         self.assertTrue(call["stdin"].startswith("[Skill projeto-docs"))
         self.assertIn("Intenção: /project", call["stdin"])
@@ -563,7 +564,7 @@ executable = {q(str(self.codex_exe))}
         self.assertTrue(call["stdin"].rstrip().endswith("Pedido: crie o Beta DOCPROPOSTA"))
         self.hud.send(ALT[2])
         self.hud.wait_for("proposta de documentação: 2 arquivo(s)")
-        self.assertIn("você › /project crie o Beta DOCPROPOSTA", s.text())
+        self.assertNotIn("[Skill projeto-docs", s.text())  # a tela mostra só o pedido, não a skill inteira
         self.assertFalse((self.vault / "Beta").exists())  # nada gravado antes de /doc salvar
         self.hud.type("/doc salvar")
         self.hud.wait_for("2 arquivo(s) gravado(s)")

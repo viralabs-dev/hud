@@ -309,6 +309,9 @@ diretório atual: um `json.py` ou `curses.py` plantado não é carregado
 | `/novo` · `/parar` | nova conversa · interrompe a resposta |
 | `/custom lista` · `/custom nome` | lista as customizações de `custom/` · usa uma (lembrada) |
 | `/custom padrao` · `/custom salvar` | volta ao layout embutido · grava a proposta que um agente fez |
+| `/skills [filtro]` · `/skill nome [pedido]` | lista as skills do HUD, do Claude Code e do Codex · usa uma com o agente do modo |
+| `/project` · `/project pedido` | lista os projetos da pasta · cria um projeto novo no modelo, ou consulta |
+| `/doc pedido` · `/doc salvar` · `/doc descartar` | planeja e escreve documentação, ou consulta · grava a proposta na pasta · descarta |
 | `/limpar` · `/ajuda` · `/sair` | `/limpar` limpa só a aba aberta |
 
 Os comandos `/` do HUD valem em qualquer modo da entrada (notas, Claude ou
@@ -323,6 +326,39 @@ e de uma busca volta para a aba de onde ele foi lançado.
 
 A roda do mouse (ou PgUp/PgDn) rola a saída, ↑/↓ percorrem o histórico, Esc limpa a linha.
 Com o mouse ligado, selecione texto com Shift+arrastar.
+
+## Skills, projetos e documentação
+
+`/skills` lista as skills que o HUD encontra: as dele (`hud-custom` e
+`projeto-docs`), as do Claude Code (`~/.claude/skills`) e as do Codex
+(`~/.codex/skills`). `/skill nome pedido` usa qualquer uma delas: o HUD lê o
+`SKILL.md` e manda o conteúdo e o pedido ao agente do modo da entrada; nas
+notas, ao Claude (ou ao Codex, se só ele estiver ligado). Vale para os dois
+agentes e em qualquer entrada.
+
+A skill `projeto-docs` cria e mantém a documentação no modelo das pastas de
+projeto de um Vault do Obsidian: a nota do projeto, `01-arquitetura` a
+`05-registro` (com as decisões em ADRs), `06-backlog` com o Kanban vivo (e a
+coluna Plano de entrega), as atividades `AT-NNN` e `99-referencia`.
+
+- `/project` sem texto lista, sem agente, os projetos da pasta (pastas com
+  `NN-backlog/Kanban (Nome).md` ou `Nome.md`).
+- `/project pedido` cria um projeto novo ao lado dos que existem
+  ("crie o projeto Loja, um e-commerce em Django") ou responde a uma consulta
+  ("quais projetos têm cards bloqueados?").
+- `/doc pedido` planeja e escreve documentação ("documente o deploy do Hud",
+  "crie as atividades do épico de login") ou consulta ("o que falta no Mudarro?").
+
+**Nada é gravado sem você.** Dentro do HUD o agente não escreve arquivos: ele
+responde com blocos `` ````hud-doc arquivo="…" ``, um por arquivo, e o HUD
+lista a proposta. `/doc salvar` grava na pasta do HUD (o Vault ou a de
+`/pasta`) só arquivos `.md`, com caminho relativo, sem `..`, sem pasta oculta
+e sem seguir link, de forma atômica; se algum arquivo já existe, mostra a
+lista e pede `s` para sobrescrever. `/doc descartar` joga a proposta fora.
+
+Fora do HUD, a mesma skill grava direto na pasta. Para instalá-la no Claude
+Code e no Codex: `hud --instalar-skill` (instala todas as skills do HUD).
+
 
 ## Vault ou outra pasta
 
@@ -467,8 +503,10 @@ nunca lê seu token OAuth.
 - **Texto de fora é limpo.** Saída de comando, notas do Vault e o que você digita
   perdem sequências de escape (título, clipboard OSC 52, cursor), controles C0/C1
   e caracteres bidi antes de chegar à tela.
-- **O Vault é só leitura.** Links simbólicos não são seguidos; notas acima de 2 MB
-  são puladas.
+- **O Vault é só leitura, com uma exceção pedida por você.** A varredura não segue
+  links e pula notas acima de 2 MB. O HUD só escreve na pasta com `/doc salvar`:
+  arquivos `.md` propostos por um agente, dentro da pasta, sem seguir link e com
+  confirmação para sobrescrever.
 - **Seus dados ficam privados.** `agenda.md` e `notas.md` são gravados com
   permissão 600 numa pasta 700; a agenda é gravada de forma atômica.
 - **Não roda como root**, e o lançador usa `python3 -I` (ignora `PYTHONPATH`,

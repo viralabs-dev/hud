@@ -66,6 +66,9 @@ if grep -v ': instalada$' <<<"$out" | grep -q "^$skills/"; then
   echo 'FALHOU: alguma skill não foi instalada no Claude' >&2; exit 1
 fi
 echo "   $n skills instaladas"
+for f in projeto-docs/SKILL.md projeto-docs/modelos/kanban.md; do
+  [ -f "$skills/$f" ] || { echo "FALHOU: a skill projeto-docs veio sem $f" >&2; exit 1; }
+done
 
 echo "== isolamento (módulos plantados)"
 for mod in re json curses os sys locale argparse pathlib tomllib subprocess threading \
