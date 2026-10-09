@@ -435,7 +435,7 @@ executable = {q(str(self.codex_exe))}
         self.hud.wait_for("VAULT · ao vivo")
         self.hud.type(f"/pasta {self.other}")
         self.hud.wait_for("PASTA · outra-pasta")
-        self.assertEqual((self.data / "pasta").read_text(encoding="utf-8").strip(), str(self.other))
+        self.assertEqual((self.data / "pasta").read_text(encoding="utf-8").strip(), str(self.other.resolve()))
         self.hud.type("/pasta vault")
         self.hud.wait_for("VAULT · ao vivo")
         self.assertNotIn("PASTA · outra-pasta", self.hud.screen.text())
@@ -535,6 +535,53 @@ class ScreenTest(unittest.TestCase):
         s = Screen(1, 5)
         s.feed(b"\x1b]0;oi\x07ok")
         self.assertEqual((s.title, s.line(0)), ("oi", "ok   "))
+
+
+
+class RawMouseTest(unittest.TestCase):
+    """Roda do mouse lida da sequência crua (ncurses do macOS não traduz SGR)."""
+
+    class Scr:
+        def __init__(self, text):
+            self.chars = list(text)
+
+        def get_wch(self):
+            import curses
+            if not self.chars:
+                raise curses.error("vazio")
+            return self.chars.pop(0)
+
+        def nodelay(self, _):
+            pass
+
+        def timeout(self, _):
+            pass
+
+    def run_seq(self, rest, scroll=0):
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from hud.ui import Hud
+        hud = SimpleNamespace(scroll=scroll, scr=self.Scr(rest))
+        hud.wheel = lambda b: Hud.wheel(hud, b)
+        with mock.patch("curses.unget_wch", create=True) as unget:
+            Hud.raw_mouse(hud)
+        return hud.scroll, hud.scr.chars, unget
+
+    def test_sgr_e_x10(self):
+        self.assertEqual(self.run_seq("<64;10;10M")[:2], (3, []))
+        self.assertEqual(self.run_seq("<65;10;10M", scroll=6)[:2], (3, []))
+        self.assertEqual(self.run_seq("<65;10;10M")[0], 0)
+        self.assertEqual(self.run_seq("M`**")[:2], (3, []))
+        self.assertEqual(self.run_seq("Ma**", scroll=3)[:2], (0, []))
+        # Clique comum e soltura (m) não rolam.
+        self.assertEqual(self.run_seq("<0;10;10M")[0], 0)
+        self.assertEqual(self.run_seq("<64;10;10m")[0], 0)
+
+    def test_outra_sequencia_devolve_o_caractere(self):
+        scroll, rest, unget = self.run_seq("Ax")
+        self.assertEqual((scroll, rest), (0, ["x"]))
+        unget.assert_called_once_with("A")
 
 
 if __name__ == "__main__":

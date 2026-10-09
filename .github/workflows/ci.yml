@@ -15,6 +15,11 @@ jobs:
           - os: windows-latest
             python: '3.13'
     runs-on: ${{ matrix.os }}
+    env:
+      # Só a saída (stdout/stderr) em UTF-8, para o log do Windows mostrar os
+      # acentos. Não é PYTHONUTF8: esse mudaria o padrão de open() e esconderia
+      # arquivo aberto sem encoding explícito.
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
         with:

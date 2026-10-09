@@ -174,8 +174,9 @@ class MetricsTest(unittest.TestCase):
     def test_discos_sem_repetir_volume(self):
         b = FakeBackend()
         home = str(Path.home())
-        b.disks = {"/raiz": ("C", 30, 100), home: ("C", 30, 100),
-                   "/dados/vault": ("D", 5, 10), "/quebrado": ("E", None, None)}
+        # str(Path(...)) e não o literal: no Windows o separador vira "\\".
+        b.disks = {str(Path("/raiz")): ("C", 30, 100), home: ("C", 30, 100),
+                   str(Path("/dados/vault")): ("D", 5, 10), str(Path("/quebrado")): ("E", None, None)}
         m = Metrics(extra_paths=[Path("/dados/vault"), Path("/quebrado"), Path("/sumiu")], backend=b)
         disks = m.sample().disks
         self.assertEqual([(d.label, d.used, d.total) for d in disks], [("R:", 30, 100), ("vault", 5, 10)])
@@ -312,7 +313,9 @@ class MacParsersTest(unittest.TestCase):
             (mac.NETSTAT, "-ib"): NETSTAT_IB,
             (mac.PMSET, "-g", "batt"): PMSET_DISCHARGING,
         }
-        with mock.patch.object(mac, "run", side_effect=lambda argv, timeout=1.5: outs.get(tuple(argv), "")):
+        # os.getloadavg não existe no Windows; o backend do macOS só roda no macOS.
+        with mock.patch.object(mac, "run", side_effect=lambda argv, timeout=1.5: outs.get(tuple(argv), "")), \
+                mock.patch.object(mac.os, "getloadavg", return_value=(1.0, 2.0, 3.0), create=True):
             b = mac.Backend(lib=False)
             self.assertIsNone(b.cpu_times())
             used, total, sw_used, sw_total = b.memory()
