@@ -411,14 +411,19 @@ class Hud:
                   f"{human_bytes(d.total - d.used)} livre")
             row += 1
         row = r + 6
-        l1, l5, l15 = s.load
-        lp = 100 * l1 / s.cores
         self.put(row, x0, "LOAD", "dim")
-        nx = self.put(row, x0 + lab, f"{l1:.2f}", self.level(lp))
-        self.put(row, nx, f"  {l5:.2f}  {l15:.2f} · {s.procs} proc", "dim", x0 + iw - nx)
+        if getattr(s, "load_ok", True):
+            l1, l5, l15 = s.load
+            nx = self.put(row, x0 + lab, f"{l1:.2f}", self.level(100 * l1 / s.cores))
+            self.put(row, nx, f"  {l5:.2f}  {l15:.2f} · {s.procs} proc", "dim", x0 + iw - nx)
+        else:  # Windows não tem load average
+            self.put(row, x0 + lab, f"—  · {s.procs} proc", "dim", iw - lab)
         self.put(row + 1, x0, "REDE", "dim")
-        nx = self.put(row + 1, x0 + lab, f"↓ {human_bytes(s.rx_rate, '/s')}", "accent")
-        self.put(row + 1, nx, f"   ↑ {human_bytes(s.tx_rate, '/s')}", "mag")
+        if getattr(s, "net_ok", True):
+            nx = self.put(row + 1, x0 + lab, f"↓ {human_bytes(s.rx_rate, '/s')}", "accent")
+            self.put(row + 1, nx, f"   ↑ {human_bytes(s.tx_rate, '/s')}", "mag")
+        else:
+            self.put(row + 1, x0 + lab, "—", "dim")
         parts: list[tuple[str, str]] = []
         if s.temp is not None:
             parts.append((f"{s.temp:.0f}°C", "crit" if s.temp >= 85 else "warn" if s.temp >= 70 else "ok"))
