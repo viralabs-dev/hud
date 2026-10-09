@@ -49,9 +49,9 @@ def custom_root(repo_hint: Path | None = None) -> Path:
     return plat.default_data_dir() / "custom"
 
 
-# O binário e o pacote do pipx trazem uma cópia de custom/ e de skills/hud-custom
-# dentro do pacote hud (packaging/hud.spec e pyproject.toml). No repositório elas
-# não existem: lá custom/ já é a raiz e a skill é a de skills/.
+# O binário e o pacote do pipx trazem uma cópia de custom/ e de skills/ dentro do
+# pacote hud (hud/_modelos e hud/_skills; packaging/hud.spec e pyproject.toml). No
+# repositório elas não existem: lá custom/ já é a raiz e as skills são as de skills/.
 _PACOTE = Path(__file__).resolve().parent
 
 
@@ -527,50 +527,131 @@ class PanelFeed:
                 self._st[pid].proc = None
 
 
+SKILL_MAX = 1 << 20  # arquivo de skill maior que isso não é copiado
+
+
+def _skill_names(root: Path) -> list[str]:
+    """As skills de uma pasta: subpastas não ocultas, que não são link, com SKILL.md."""
+    try:
+        entries = sorted(root.iterdir())
+    except OSError:
+        return []
+    return [p.name for p in entries
+            if not p.name.startswith(".") and not plat.is_link(p) and p.is_dir()
+            and (p / "SKILL.md").is_file() and not plat.is_link(p / "SKILL.md")]
+
+
+def skills_root() -> Path | None:
+    """As skills que vêm com o HUD: skills/ do repositório ou a cópia embutida (hud/_skills)."""
+    repo = _PACOTE.parent / "skills"
+    if _skill_names(repo):
+        return repo
+    p = _PACOTE / "_skills"
+    return p if p.is_dir() else None
+
+
 def skill_dir() -> Path | None:
     """A skill hud-custom: a do repositório ou a cópia embutida no binário/pipx."""
-    for p in (_PACOTE.parent / "skills" / "hud-custom", _PACOTE / "_skill"):
-        if (p / "SKILL.md").is_file():
-            return p
+    root = skills_root()
+    if root is not None and "hud-custom" in _skill_names(root):
+        return root / "hud-custom"
     return None
 
 
-def skill_targets(env=None) -> list[Path]:
+def skill_homes(env=None) -> list[Path]:
     """Onde o Claude Code e o Codex procuram skills do usuário."""
     env = os.environ if env is None else env
     home = Path.home()
     claude = Path(env.get("CLAUDE_CONFIG_DIR") or home / ".claude")
     codex = Path(env.get("CODEX_HOME") or home / ".codex")
-    return [claude / "skills" / "hud-custom", codex / "skills" / "hud-custom"]
+    return [claude / "skills", codex / "skills"]
 
 
-def install_skill(targets: list[Path] | None = None) -> list[tuple[Path, str, bool]]:
-    """Copia a skill para o Claude e o Codex (hud --instalar-skill): (destino, situação, ok).
-
-    Só instala onde a pasta do agente já existe (~/.claude, ~/.codex). Um destino
-    que é link (a instalação pelo repositório, ln -s) é mantido como está.
-    """
-    src = skill_dir()
-    if src is None:
-        raise CustomError("a skill hud-custom não veio com este HUD")
-    files = sorted(p for p in src.iterdir()
-                   if p.is_file() and not p.is_symlink() and not p.name.startswith("."))
+def _skill_files(src: Path) -> list[Path]:
+    """Os arquivos de uma skill (caminhos relativos): comuns, não ocultos, até 1 MB, sem links."""
     out = []
-    for t in skill_targets() if targets is None else targets:
-        agent_home = t.parent.parent
-        if not agent_home.is_dir():
-            out.append((t, f"{agent_home} não existe: pulado", False))
-        elif plat.is_link(t):
-            out.append((t, "já é um link (instalação pelo repositório): mantido", True))
-        elif t.exists() and not t.is_dir():
-            out.append((t, "existe e não é pasta: pulado", False))
-        else:
-            t.mkdir(parents=True, exist_ok=True)
-            for f in files:
-                if plat.is_link(t / f.name):
-                    raise CustomError(f"{t / f.name} é link simbólico")
-                _write_shared(t / f.name, f.read_bytes())
-            out.append((t, "instalada", True))
+    for dirpath, dirnames, filenames in os.walk(src, followlinks=False):
+        base = Path(dirpath)
+        dirnames[:] = sorted(n for n in dirnames
+                             if not n.startswith(".") and not plat.is_link(base / n))
+        for n in sorted(filenames):
+            f = base / n
+            if n.startswith(".") or n.endswith(".tmp"):
+                continue
+            try:
+                st = os.lstat(f)
+            except OSError:
+                continue
+            if stat.S_ISREG(st.st_mode) and not plat.is_reparse(st) and st.st_size <= SKILL_MAX:
+                out.append(f.relative_to(src))
+    return out
+
+
+def _mkdir_nofollow(path: Path) -> None:
+    """Cria a pasta (o pai já existe) sem seguir link: uma que já é link é recusada."""
+    if plat.is_link(path):
+        raise CustomError(f"{path} é link simbólico")
+    try:
+        path.mkdir()
+    except FileExistsError:
+        pass
+    else:
+        if not plat.WINDOWS:
+            os.chmod(path, 0o755)
+    if plat.is_link(path) or not path.is_dir():
+        raise CustomError(f"{path} não é uma pasta")
+
+
+def _install_one(src: Path, home: Path, nome: str) -> str:
+    t = home / nome
+    files = _skill_files(src)
+    if not home.is_dir():
+        _mkdir_nofollow(home)  # ~/.claude/skills (a pasta do agente já existe)
+    _mkdir_nofollow(t)
+    if os.path.realpath(t) != os.path.join(os.path.realpath(home), nome):
+        raise CustomError(f"{t} sai da pasta de skills")
+    for rel in files:
+        d = t
+        for part in rel.parts[:-1]:
+            d = d / part
+            _mkdir_nofollow(d)
+        dst = t / rel
+        if plat.is_link(dst):
+            raise CustomError(f"{dst} é link simbólico")
+        if dst.exists() and not dst.is_file():
+            raise CustomError(f"{dst} existe e não é arquivo")
+        _write_shared(dst, (src / rel).read_bytes())
+    return "instalada"
+
+
+def install_skill(homes: list[Path] | None = None) -> list[tuple[Path, str, bool]]:
+    """Copia as skills do HUD para o Claude e o Codex (hud --instalar-skill).
+
+    Devolve (destino, situação, ok) por skill e por agente. Só instala onde a
+    pasta do agente já existe (~/.claude, ~/.codex). Um destino que é link (a
+    instalação pelo repositório, ln -s) é mantido como está. Repetir atualiza;
+    arquivo que saiu da skill fica no destino.
+    """
+    root = skills_root()
+    nomes = _skill_names(root) if root is not None else []
+    if not nomes:
+        raise CustomError("nenhuma skill veio com este HUD")
+    out = []
+    for home in skill_homes() if homes is None else homes:
+        agent_home = home.parent
+        for nome in nomes:
+            t = home / nome
+            if not agent_home.is_dir():
+                out.append((t, f"{agent_home} não existe: pulado", False))
+            elif plat.is_link(t):
+                out.append((t, "já é um link (instalação pelo repositório): mantido", True))
+            elif t.exists() and not t.is_dir():
+                out.append((t, "existe e não é pasta: pulado", False))
+            else:
+                try:
+                    out.append((t, _install_one(root / nome, home, nome), True))
+                except (CustomError, OSError) as e:
+                    out.append((t, f"recusado: {e}", False))
     return out
 
 

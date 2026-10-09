@@ -44,9 +44,28 @@ echo "== modelos e skill embutidos"
 out="$(cd "$dir" && env -i PATH=/usr/bin:/bin HOME="$dir/home" "$bin" --custom-check foco -c "$cfg")"
 grep -q '^OK: foco ' <<<"$out" || { echo "$out" >&2; echo 'FALHOU: o modelo foco não veio no binário' >&2; exit 1; }
 mkdir -p "$dir/home/.claude"
-(cd "$dir" && env -i PATH=/usr/bin:/bin HOME="$dir/home" "$bin" --instalar-skill)
+out="$(cd "$dir" && env -i PATH=/usr/bin:/bin HOME="$dir/home" "$bin" --instalar-skill)" ||
+  { echo "$out" >&2; echo 'FALHOU: hud --instalar-skill saiu com erro' >&2; exit 1; }
+echo "$out"
 grep -q '^name: hud-custom' "$dir/home/.claude/skills/hud-custom/SKILL.md" ||
-  { echo 'FALHOU: hud --instalar-skill não instalou a skill' >&2; exit 1; }
+  { echo 'FALHOU: hud --instalar-skill não instalou a skill hud-custom' >&2; exit 1; }
+# Toda skill embutida: uma linha "<destino>: instalada" por skill no Claude, cada
+# destino com SKILL.md, e nenhuma pasta a mais ou a menos em .claude/skills.
+skills="$dir/home/.claude/skills"
+n=0
+while IFS= read -r linha; do
+  destino="${linha%: instalada}"
+  [ "$(dirname "$destino")" = "$skills" ] || continue
+  [ -f "$destino/SKILL.md" ] || { echo "FALHOU: $destino sem SKILL.md" >&2; exit 1; }
+  n=$((n + 1))
+done < <(grep ': instalada$' <<<"$out")
+pastas="$(find "$skills" -mindepth 1 -maxdepth 1 -type d | wc -l)"
+[ "$n" -ge 1 ] && [ "$n" -eq "$pastas" ] ||
+  { echo "FALHOU: $n skills instaladas, $pastas pastas em .claude/skills" >&2; exit 1; }
+if grep -v ': instalada$' <<<"$out" | grep -q "^$skills/"; then
+  echo 'FALHOU: alguma skill não foi instalada no Claude' >&2; exit 1
+fi
+echo "   $n skills instaladas"
 
 echo "== isolamento (módulos plantados)"
 for mod in re json curses os sys locale argparse pathlib tomllib subprocess threading \

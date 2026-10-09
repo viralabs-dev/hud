@@ -28,7 +28,7 @@ def main() -> int:
     p.add_argument("--check", action="store_true", help="valida a configuração e sai")
     p.add_argument("--custom-check", metavar="NOME", help="valida custom/NOME e sai")
     p.add_argument("--instalar-skill", action="store_true",
-                   help="copia a skill hud-custom para o Claude Code e o Codex e sai")
+                   help="copia as skills do HUD para o Claude Code e o Codex e sai")
     p.add_argument("--version", action="version", version=f"hud {__version__}")
     args = p.parse_args()
 
@@ -92,10 +92,14 @@ def instalar_skill() -> int:
     except (custom.CustomError, OSError) as e:
         print(f"hud: {e}", file=sys.stderr)
         return 1
+    # Uma linha por skill e por agente: "<destino>: <situação>".
     for destino, situacao, _ in result:
         print(f"{destino}: {situacao}")
     if not any(ok for *_, ok in result):
-        print("hud: nem o Claude Code nem o Codex estão instalados para este usuário.", file=sys.stderr)
+        if all(situacao.endswith("não existe: pulado") for _, situacao, _ in result):
+            print("hud: nem o Claude Code nem o Codex estão instalados para este usuário.", file=sys.stderr)
+        else:
+            print("hud: nenhuma skill foi instalada.", file=sys.stderr)
         return 1
     return 0
 

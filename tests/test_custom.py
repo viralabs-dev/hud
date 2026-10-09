@@ -406,15 +406,26 @@ class ListTest(unittest.TestCase):
 
 
 class EmbutidosTest(unittest.TestCase):
-    """Binário e pipx: os modelos e a skill vêm em hud/_modelos e hud/_skill."""
+    """Binário e pipx: os modelos e as skills vêm em hud/_modelos e hud/_skills."""
 
     def pacote(self, d):
         pkg = Path(d) / "pkg" / "hud"
         (pkg / "_modelos" / "foco").mkdir(parents=True)
         (pkg / "_modelos" / "foco" / "layout.toml").write_text(LAYOUT)
         (pkg / "_modelos" / "foco" / "notas.md").write_text("# modelo\n")
-        (pkg / "_skill").mkdir()
-        (pkg / "_skill" / "SKILL.md").write_text("---\nname: hud-custom\n---\n")
+        sk = pkg / "_skills"
+        (sk / "hud-custom").mkdir(parents=True)
+        (sk / "hud-custom" / "SKILL.md").write_text("---\nname: hud-custom\n---\n")
+        (sk / "outra" / "modelos").mkdir(parents=True)
+        (sk / "outra" / "SKILL.md").write_text("---\nname: outra\n---\n")
+        (sk / "outra" / "modelos" / "a.md").write_text("# a\n")
+        # O que não é skill ou não se copia: pasta sem SKILL.md, oculta, arquivo oculto e grande.
+        (sk / "sem-skill").mkdir()
+        (sk / "sem-skill" / "x.md").write_text("x\n")
+        (sk / ".oculta").mkdir()
+        (sk / ".oculta" / "SKILL.md").write_text("oculta\n")
+        (sk / "outra" / ".segredo").write_text("não copiar\n")
+        (sk / "outra" / "grande.md").write_bytes(b"x" * (cu.SKILL_MAX + 1))
         return pkg
 
     def test_modelos_embutidos(self):
@@ -438,40 +449,93 @@ class EmbutidosTest(unittest.TestCase):
                 self.assertIsNone(cu.templates_root())
                 self.assertIsNone(cu.skill_dir())
 
+    def test_skills_root(self):
+        with tempfile.TemporaryDirectory() as d:
+            pkg = self.pacote(d)
+            with mock.patch.object(cu, "_PACOTE", pkg):
+                # Sem skills/ ao lado do pacote: a cópia embutida.
+                self.assertEqual(cu.skills_root(), pkg / "_skills")
+                self.assertEqual(cu.skill_dir(), pkg / "_skills" / "hud-custom")
+                self.assertEqual(cu._skill_names(cu.skills_root()), ["hud-custom", "outra"])
+                # skills/ sem nenhuma skill não conta como repositório.
+                (pkg.parent / "skills" / "vazia").mkdir(parents=True)
+                self.assertEqual(cu.skills_root(), pkg / "_skills")
+                # Rodando do repositório: skills/ ao lado do pacote.
+                (pkg.parent / "skills" / "so-esta").mkdir()
+                (pkg.parent / "skills" / "so-esta" / "SKILL.md").write_text("x\n")
+                self.assertEqual(cu.skills_root(), pkg.parent / "skills")
+                self.assertIsNone(cu.skill_dir())  # o repositório falso não tem a hud-custom
+        # O repositório de verdade.
+        self.assertEqual(cu.skills_root(), Path(cu.__file__).resolve().parent.parent / "skills")
+        self.assertEqual(cu.skill_dir(), cu.skills_root() / "hud-custom")
+
     def test_instalar_skill(self):
         with tempfile.TemporaryDirectory() as d:
             pkg = self.pacote(d)
             home = Path(d) / "home"
             (home / ".claude").mkdir(parents=True)
             (home / ".codex" / "skills").mkdir(parents=True)
-            symlink(self, pkg / "_skill", home / ".codex" / "skills" / "hud-custom")
-            targets = [home / ".claude" / "skills" / "hud-custom",
-                       home / ".codex" / "skills" / "hud-custom",
-                       home / ".outro" / "skills" / "hud-custom"]
+            symlink(self, pkg / "_skills" / "hud-custom", home / ".codex" / "skills" / "hud-custom")
+            homes = [home / ".claude" / "skills", home / ".codex" / "skills", home / ".outro" / "skills"]
             with mock.patch.object(cu, "_PACOTE", pkg):
-                got = cu.install_skill(targets)
-                self.assertEqual([ok for *_, ok in got], [True, True, False])
-                self.assertIn("instalada", got[0][1])
-                self.assertIn("link", got[1][1])
-                self.assertIn("pulado", got[2][1])
-                self.assertEqual((targets[0] / "SKILL.md").read_text(), "---\nname: hud-custom\n---\n")
+                got = cu.install_skill(homes)
+                self.assertEqual([(t.relative_to(home).as_posix(), ok) for t, _, ok in got], [
+                    (".claude/skills/hud-custom", True), (".claude/skills/outra", True),
+                    (".codex/skills/hud-custom", True), (".codex/skills/outra", True),
+                    (".outro/skills/hud-custom", False), (".outro/skills/outra", False)])
+                self.assertEqual([s for _, s, _ in got[:2]], ["instalada", "instalada"])
+                self.assertIn("link", got[2][1])
+                self.assertEqual(got[3][1], "instalada")
+                self.assertIn("pulado", got[4][1])
+                claude = home / ".claude" / "skills"
+                self.assertEqual((claude / "hud-custom" / "SKILL.md").read_text(), "---\nname: hud-custom\n---\n")
+                self.assertEqual((claude / "outra" / "modelos" / "a.md").read_text(), "# a\n")
+                self.assertEqual(sorted(p.relative_to(claude).as_posix() for p in claude.rglob("*")), [
+                    "hud-custom", "hud-custom/SKILL.md", "outra", "outra/SKILL.md",
+                    "outra/modelos", "outra/modelos/a.md"])
+                # O link (instalação pelo repositório) ficou como estava.
+                self.assertTrue(plat.is_link(home / ".codex" / "skills" / "hud-custom"))
                 if not WINDOWS:
-                    self.assertEqual(stat.S_IMODE((targets[0] / "SKILL.md").stat().st_mode), 0o644)
-                cu.install_skill(targets[:1])  # repetir atualiza
-                (targets[0] / "SKILL.md").unlink()
-                symlink(self, "/etc/passwd", targets[0] / "SKILL.md")
-                with self.assertRaises(cu.CustomError):
-                    cu.install_skill(targets[:1])
+                    for f in ("hud-custom/SKILL.md", "outra/modelos/a.md"):
+                        self.assertEqual(stat.S_IMODE((claude / f).stat().st_mode), 0o644)
+                    self.assertEqual(stat.S_IMODE((claude / "outra" / "modelos").stat().st_mode), 0o755)
+                # Repetir atualiza; o que saiu da skill fica no destino.
+                (pkg / "_skills" / "outra" / "modelos" / "a.md").write_text("# a2\n")
+                (claude / "outra" / "velho.md").write_text("velho\n")
+                got = cu.install_skill(homes[:1])
+                self.assertTrue(all(ok for *_, ok in got))
+                self.assertEqual((claude / "outra" / "modelos" / "a.md").read_text(), "# a2\n")
+                self.assertTrue((claude / "outra" / "velho.md").is_file())
+                # Arquivo de destino que é link: recusado, sem escrever através dele; a outra skill instala.
+                alvo = Path(d) / "alvo.md"
+                alvo.write_text("intocado\n")
+                (claude / "hud-custom" / "SKILL.md").unlink()
+                symlink(self, alvo, claude / "hud-custom" / "SKILL.md")
+                got = cu.install_skill(homes[:1])
+                self.assertEqual([ok for *_, ok in got], [False, True])
+                self.assertIn("link simbólico", got[0][1])
+                self.assertEqual(alvo.read_text(), "intocado\n")
+                # Subpasta de destino que é link: recusada também.
+                (claude / "hud-custom" / "SKILL.md").unlink()
+                fora = Path(d) / "fora"
+                fora.mkdir()
+                for p in sorted((claude / "outra" / "modelos").iterdir()):
+                    p.unlink()
+                (claude / "outra" / "modelos").rmdir()
+                symlink(self, fora, claude / "outra" / "modelos")
+                got = cu.install_skill(homes[:1])
+                self.assertEqual([ok for *_, ok in got], [True, False])
+                self.assertEqual(list(fora.iterdir()), [])
             self.assertFalse((home / ".outro").exists())
             with mock.patch.object(cu, "_PACOTE", Path(d) / "nada" / "hud"):
                 with self.assertRaises(cu.CustomError):
-                    cu.install_skill(targets[:1])
+                    cu.install_skill(homes[:1])
 
-    def test_skill_targets(self):
-        t = cu.skill_targets({"CLAUDE_CONFIG_DIR": "/c", "CODEX_HOME": "/x"})
-        self.assertEqual(t, [Path("/c/skills/hud-custom"), Path("/x/skills/hud-custom")])
-        t = cu.skill_targets({})
-        self.assertEqual(t, [Path.home() / ".claude/skills/hud-custom", Path.home() / ".codex/skills/hud-custom"])
+    def test_skill_homes(self):
+        t = cu.skill_homes({"CLAUDE_CONFIG_DIR": "/c", "CODEX_HOME": "/x"})
+        self.assertEqual(t, [Path("/c/skills"), Path("/x/skills")])
+        t = cu.skill_homes({})
+        self.assertEqual(t, [Path.home() / ".claude/skills", Path.home() / ".codex/skills"])
 
 
 class PanelFeedTest(unittest.TestCase):

@@ -1,5 +1,6 @@
 """Empacotamento: pyproject.toml válido, sem dependências, entrada em modo isolado."""
 
+import fnmatch
 import os
 import tomllib
 import unittest
@@ -33,14 +34,29 @@ class PyprojectTest(unittest.TestCase):
         self.assertNotIn("optional-dependencies", self.project)
 
     def test_so_o_pacote_hud(self):
-        # Além do código, só os dados embutidos: os modelos de custom/ e a skill.
-        self.assertEqual(self.setuptools["packages"], ["hud", "hud._modelos", "hud._skill"])
+        # Além do código, só os dados embutidos: os modelos de custom/ e as skills.
+        self.assertEqual(self.setuptools["packages"], ["hud", "hud._modelos", "hud._skills"])
         self.assertEqual(self.setuptools["package-dir"],
-                         {"hud._modelos": "custom", "hud._skill": "skills/hud-custom"})
+                         {"hud._modelos": "custom", "hud._skills": "skills"})
         for pkg, src in self.setuptools["package-dir"].items():
             self.assertFalse(any((ROOT / src).rglob("*.py")), f"{src} não pode ter código")
         self.assertTrue((ROOT / "custom" / "foco" / "layout.toml").is_file())
         self.assertTrue((ROOT / "skills" / "hud-custom" / "SKILL.md").is_file())
+
+    def test_skills_embutidas(self):
+        # Toda skill (SKILL.md e arquivos de subpastas como modelos/) entra no pacote.
+        dados = self.setuptools["package-data"]["hud._skills"]
+        for padrao in ("*/*.md", "*/*/*.md"):
+            self.assertIn(padrao, dados)
+        for f in (ROOT / "skills").rglob("*"):
+            rel = f.relative_to(ROOT / "skills")
+            if f.is_file() and not any(p.startswith(".") for p in rel.parts):
+                # Os globs do setuptools valem segmento a segmento ("*" não atravessa "/").
+                self.assertTrue(any(len(rel.parts) == len(p.split("/")) and
+                                    all(fnmatch.fnmatchcase(a, b) for a, b in zip(rel.parts, p.split("/")))
+                                    for p in dados), f"skills/{rel} ficaria fora do pacote")
+        spec = (ROOT / "packaging" / "hud.spec").read_text(encoding="utf-8")
+        self.assertIn('(os.path.join(ROOT, "skills"), os.path.join("hud", "_skills"))', spec)
 
     def test_entrada_isolada(self):
         # O comando `hud` é scripts/hud, que roda o Python do venv com -I e
