@@ -3,18 +3,26 @@
 # PATH serve os arquivos de uma "release" local (e confere que o instalador só
 # pede HTTPS com TLS 1.2+). Tudo acontece numa pasta temporária.
 #
+# Roda no Linux e no macOS (bash 3.2, ferramentas BSD).
+#
 # Uso: scripts/test-installer.sh [pacote.tar.gz]
 #   Sem argumento, monta um pacote falso (binário = script que imprime a versão).
-#   Com um dist/hud_linux_<arch>.tar.gz real, instala o binário de verdade.
+#   Com um dist/hud_<linux|darwin>_<arch>.tar.gz real, instala o binário de verdade.
 set -euo pipefail
 
-root="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 work="$(mktemp -d)"
 trap 'rm -rf -- "$work"' EXIT
 chmod 700 "$work"
 
+case "$(uname -s)" in Linux) os=linux ;; Darwin) os=darwin ;; *) echo 'sistema sem teste (no Windows: scripts/test-installer.ps1)' >&2; exit 1 ;; esac
 case "$(uname -m)" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) echo 'arquitetura sem teste' >&2; exit 1 ;; esac
-asset="hud_linux_${arch}.tar.gz"
+if [[ "$os" == darwin && "$(/usr/sbin/sysctl -n sysctl.proc_translated 2>/dev/null || true)" == 1 ]]; then
+  arch=arm64  # o instalador também prefere o nativo sob Rosetta
+fi
+asset="hud_${os}_${arch}.tar.gz"
+sha256() { if command -v sha256sum >/dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
+mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 repo="teste/hud"
 pass=0
 ok() { pass=$((pass + 1)); printf 'ok %d - %s\n' "$pass" "$1"; }
@@ -37,7 +45,7 @@ make_release() { # make_release <tag> <versão> [pacote real]
       tar -czf "$dir/$asset" -C "$stage" hud LICENSE THIRD_PARTY_NOTICES.md LICENSES
     fi
   fi
-  (cd "$dir" && sha256sum "$asset" > checksums.txt)
+  (cd "$dir" && sha256 "$asset" > checksums.txt)
 }
 make_release v0.1.0 0.1.0
 make_release v0.2.0 0.2.0 "${1:-}"
@@ -100,7 +108,14 @@ for f in "$root"/LICENSES/*.txt; do
 done
 grep -q 'Adicione ao PATH' "$work/out" || die 'não avisou do PATH'
 grep -q 'releases/latest/download/' "$work/curl.log" || die 'latest não usou releases/latest'
-[[ "$(stat -c %a "$dest/hud")" == 755 ]] || die 'permissão do binário'
+[[ "$(mode_of "$dest/hud")" == 755 ]] || die 'permissão do binário'
+grep -q "/$asset\$" "$work/curl.log" || die "não baixou $asset"
+if [[ "$os" == darwin ]]; then
+  grep -q 'não é assinado nem notarizado' "$work/out" || die 'não avisou do Gatekeeper'
+  if xattr -p com.apple.quarantine "$dest/hud" >/dev/null 2>&1; then die 'binário ficou em quarentena'; fi
+else
+  if grep -q 'notarizado' "$work/out"; then die 'aviso do Gatekeeper fora do macOS'; fi
+fi
 ok 'instala a latest com binário e avisos de licença'
 
 # 2. versão fixa (volta para a 0.1.0) e repetição (atualiza para a 0.2.0)
@@ -108,7 +123,7 @@ run HUD_VERSION=v0.1.0 || die 'instalação v0.1.0'
 [[ "$("$dest/hud" --version)" == "hud 0.1.0" ]] || die 'HUD_VERSION=v0.1.0 não instalou a 0.1.0'
 run HUD_VERSION=v0.2.0 || die 'atualização'
 [[ "$("$dest/hud" --version)" == "$latest_v" ]] || die 'repetir não atualizou'
-[[ -z "$(find "$dest" -maxdepth 2 -name '.hud-install.*' -o -maxdepth 2 -name '.tmp.*')" ]] || die 'sobrou temporário'
+[[ -z "$(find "$dest" -maxdepth 2 \( -name '.hud-install.*' -o -name '.tmp.*' \))" ]] || die 'sobrou temporário'
 ok 'HUD_VERSION fixa e repetição atualizam sem sobrar temporário'
 
 # 3. HUD_INSTALL_DIR
@@ -117,12 +132,12 @@ run HUD_INSTALL_DIR="$work/outro" || die 'HUD_INSTALL_DIR'
 ok 'HUD_INSTALL_DIR'
 
 # 4. checksum divergente e ausente: não toca no binário instalado
-before="$(sha256sum "$dest/hud")"
+before="$(sha256 "$dest/hud")"
 if run HUD_VERSION=v0.3.0; then die 'aceitou checksum divergente'; fi
 grep -q 'Checksum divergente' "$work/out" || die 'mensagem de checksum divergente'
 if run HUD_VERSION=v0.4.0; then die 'aceitou checksum ausente'; fi
 grep -q 'Checksum ausente' "$work/out" || die 'mensagem de checksum ausente'
-[[ "$(sha256sum "$dest/hud")" == "$before" ]] || die 'binário mudou após checksum inválido'
+[[ "$(sha256 "$dest/hud")" == "$before" ]] || die 'binário mudou após checksum inválido'
 ok 'checksum divergente ou ausente interrompe sem mexer no instalado'
 
 # 5. versão inválida e versão inexistente
@@ -160,5 +175,38 @@ ok 'nada consome o stdin do curl | bash'
 # 8. sintaxe
 bash -n "$root/install.sh" || die 'bash -n install.sh'
 ok 'bash -n install.sh'
+
+# 9. macOS simulado no Linux: uname diz Darwin, não há sha256sum (só shasum) e
+#    o xattr é falso. Prova o ramo do macOS (pacote darwin, shasum, quarentena,
+#    aviso do Gatekeeper) sem um Mac; o runner macos-* roda os grupos 1-8 de verdade.
+if [[ "$os" == linux ]] && command -v shasum >/dev/null; then
+  mac="$work/macbin"; mkdir "$mac"
+  for t in bash sh cat env awk tar gzip mktemp cp chmod mv mkdir rm id readlink shasum perl sed grep; do
+    p="$(command -v "$t")" || die "falta $t para o teste do macOS simulado"
+    ln -s "$p" "$mac/$t"
+  done
+  cp "$work/fakebin/curl" "$mac/curl"
+  for m in arm64 x86_64; do
+    printf '#!/bin/sh\ncase "$1" in -s) echo Darwin ;; -m) echo %s ;; *) echo Darwin ;; esac\n' "$m" > "$mac/uname"
+    printf '#!/bin/sh\necho "xattr $*" >> "%s/xattr.log"\nexit 1\n' "$work" > "$mac/xattr"
+    chmod 755 "$mac/uname" "$mac/xattr"
+    case "$m" in arm64) a=arm64 ;; *) a=amd64 ;; esac
+    rel="$work/srv/$repo/releases/download/v0.5.0"
+    rm -rf "$rel"; mkdir -p "$rel"
+    cp "$work/srv/$repo/releases/download/v0.2.0/$asset" "$rel/hud_darwin_$a.tar.gz"
+    (cd "$rel" && shasum -a 256 "hud_darwin_$a.tar.gz" > checksums.txt)
+    rm -f "$work/xattr.log" "$work/curl.log"
+    cat "$root/install.sh" | env -i PATH="$mac" HOME="$home" HUD_REPOSITORY="$repo" \
+      HUD_VERSION=v0.5.0 HUD_INSTALL_DIR="$work/mac-$a" bash > "$work/out" 2>&1 || die "macOS simulado ($m)"
+    grep -q "/hud_darwin_$a.tar.gz\$" "$work/curl.log" || die "macOS $m não baixou hud_darwin_$a.tar.gz"
+    grep -q 'xattr -d com.apple.quarantine' "$work/xattr.log" || die 'macOS: não tirou a quarentena'
+    grep -q 'não é assinado nem notarizado' "$work/out" || die 'macOS: sem aviso do Gatekeeper'
+    [[ -x "$work/mac-$a/hud" && -f "$work/mac-$a/hud-licenses/THIRD_PARTY_NOTICES.md" ]] || die "macOS $m: não instalou"
+  done
+  printf '#!/bin/sh\ncase "$1" in -m) echo x86_64 ;; *) echo MINGW64_NT-10.0 ;; esac\n' > "$mac/uname"
+  if cat "$root/install.sh" | env -i PATH="$mac" HOME="$home" bash > "$work/out" 2>&1; then die 'aceitou o bash do Windows'; fi
+  grep -q 'install.ps1' "$work/out" || die 'bash do Windows: não indicou o install.ps1'
+  ok 'macOS simulado (arm64 e x86_64: shasum, quarentena, aviso) e bash do Windows recusado'
+fi
 
 echo "instalador: $pass grupos de teste ok"

@@ -1,0 +1,9 @@
+# Para rodar os testes do HUD no Windows (o código importa curses, que o Python
+# do Windows não traz). Só o CI e quem desenvolve no Windows; o binário já leva
+# o _curses dentro. Hashes dos wheels win_amd64 do PyPI (CPython 3.11 a 3.14):
+#   python -m pip install --require-hashes --only-binary=:all: -r packaging\requirements-test-windows.txt
+windows-curses==2.4.2 \
+    --hash=sha256:03c4ef0095ab8212ed964236d51b4d8c815f302c5a7de94831dae468f05ce333 \
+    --hash=sha256:df782859176f9e8142618e4966d6cee7a53a8b1c819faeb6e606a60fa4f8972a \
+    --hash=sha256:1bf3d0c902374b6c430a954adcb686a5ecd7a31fc4195d31136385b5c1bea925 \
+    --hash=sha256:6c22cb0310500dfbfe54c76354e37070e300d5473596d48ac4f9c65b2d578b6f

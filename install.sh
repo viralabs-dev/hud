@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Instalador do HUD: baixa o binário autocontido da release (não precisa de
-# Python), confere o SHA-256 e instala em ~/.local/bin/hud.
+# Instalador do HUD para Linux e macOS: baixa o binário autocontido da release
+# (não precisa de Python), confere o SHA-256 e instala em ~/.local/bin/hud.
+# No Windows, use o install.ps1 (PowerShell).
 #
 #   curl -fsSL https://raw.githubusercontent.com/viralabs-dev/hud/main/install.sh | bash
 #
@@ -20,14 +21,20 @@ fail() { printf 'hud: %s\n' "$*" >&2; exit 1; }
 
 case "$(uname -s)" in
   Linux) platform=linux ;;
-  Darwin) fail 'macOS ainda não é suportado (o HUD lê /proc e /sys). Use Linux ou WSL.' ;;
-  *) fail 'Sistema não suportado; no Windows, use o WSL.' ;;
+  Darwin) platform=darwin ;;
+  MINGW*|MSYS*|CYGWIN*) fail 'No Windows, use o PowerShell: irm https://raw.githubusercontent.com/viralabs-dev/hud/main/install.ps1 | iex' ;;
+  *) fail "Sistema não suportado: $(uname -s) (há binários para Linux, macOS e Windows)." ;;
 esac
 case "$(uname -m)" in
   x86_64|amd64) arch=amd64 ;;
   aarch64|arm64) arch=arm64 ;;
   *) fail "Arquitetura não suportada: $(uname -m) (há binários para amd64 e arm64)." ;;
 esac
+# Num Mac com Apple Silicon, um terminal sob Rosetta diz x86_64: prefira o nativo.
+if [[ "$platform" == darwin && "$arch" == amd64 ]] &&
+   [[ "$(/usr/sbin/sysctl -n sysctl.proc_translated 2>/dev/null || true)" == 1 ]]; then
+  arch=arm64
+fi
 for tool in curl tar mktemp awk; do
   command -v "$tool" >/dev/null || fail "Requisito ausente: $tool"
 done
@@ -69,7 +76,7 @@ expected="$(awk -v file="$asset" '$2 == file || $2 == "*" file { print $1 }' "$t
 [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || fail 'Checksum ausente ou inválido em checksums.txt.'
 if command -v sha256sum >/dev/null; then
   actual="$(sha256sum "$tmp/$asset")"
-elif command -v shasum >/dev/null; then
+elif command -v shasum >/dev/null; then  # macOS: não tem sha256sum
   actual="$(shasum -a 256 "$tmp/$asset")"
 else
   fail 'Instale sha256sum (coreutils) ou shasum.'
@@ -97,7 +104,16 @@ new="$(mktemp "$install_dir/.hud-install.XXXXXX")"
 trap 'rm -rf -- "$tmp"; rm -f -- "$new"' EXIT
 cp "$tmp/x/hud" "$new"
 chmod 755 "$new"
-"$new" --version >/dev/null </dev/null || fail 'O binário baixado não roda nesta máquina (glibc antiga?).'
+if [[ "$platform" == darwin ]]; then
+  # O curl não marca o download com quarentena, mas um pacote baixado pelo
+  # navegador e passado por aqui (ou um proxy que marque) faria o Gatekeeper
+  # barrar o binário, que não é assinado nem notarizado pela Apple.
+  xattr -d com.apple.quarantine "$new" 2>/dev/null || true
+  hint='macOS antigo?'
+else
+  hint='glibc antiga?'
+fi
+"$new" --version >/dev/null </dev/null || fail "O binário baixado não roda nesta máquina ($hint)."
 [[ ! -L "$target" ]] || fail "$target virou symlink durante a instalação."
 mv -f "$new" "$target"
 
@@ -112,6 +128,10 @@ done
 
 printf 'HUD instalado: %s (%s)\n' "$target" "$("$target" --version </dev/null)"
 printf 'Avisos de licença: %s\n' "$notice_dir"
+if [[ "$platform" == darwin ]]; then
+  printf 'Nota: o binário não é assinado nem notarizado pela Apple. Instalado por aqui, ele roda;\n'
+  printf '      se o macOS bloquear (arquivo vindo do navegador), rode: xattr -d com.apple.quarantine %q\n' "$target"
+fi
 case ":$PATH:" in
   *":$install_dir:"*) ;;
   *) printf 'Adicione ao PATH: export PATH="%s:$PATH"\n' "$install_dir" ;;

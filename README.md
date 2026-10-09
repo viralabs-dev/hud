@@ -54,12 +54,18 @@ A gravação crua fica em `docs/telas/hud-demo.cast` (asciinema v2), `hud-demo.p
 O HUD é distribuído como um binário autocontido: o Python e o `curses` vão
 dentro dele, então **não é preciso ter Python instalado**.
 
-- **Sistemas:** Linux amd64 e arm64, com glibc 2.35 ou mais nova (Ubuntu 22.04+,
-  Debian 12+, Fedora 36+ e equivalentes). No Windows, use o WSL.
-- **macOS:** ainda não. O HUD lê `/proc` e `/sys`, que o macOS não tem.
-- Distribuições com musl (Alpine) não rodam o binário; use o `pipx` (abaixo).
+| Sistema | Arquitetura | Pacote da release | Instalador | Requisitos |
+|---|---|---|---|---|
+| Linux | amd64, arm64 | `hud_linux_<arch>.tar.gz` | `install.sh` | glibc 2.35 ou mais nova (Ubuntu 22.04+, Debian 12+, Fedora 36+ e equivalentes) |
+| macOS | arm64 (Apple Silicon), amd64 (Intel) | `hud_darwin_<arch>.tar.gz` | `install.sh` | macOS 11 ou mais novo |
+| Windows | amd64 (no Windows 11 ARM, pela emulação x64) | `hud_windows_amd64.zip` | `install.ps1` | Windows 10 ou 11, PowerShell 5.1 ou 7+ |
+| WSL | amd64, arm64 | o do Linux | `install.sh` | como no Linux |
 
-### Comando
+Distribuições com musl (Alpine) não rodam o binário; use o `pipx` (abaixo).
+Os binários não são assinados (nem notarizados pela Apple): veja as notas do
+[macOS](#macos-gatekeeper) e do [Windows](#windows).
+
+### Linux e macOS
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/viralabs-dev/hud/main/install.sh | bash
@@ -67,13 +73,30 @@ export PATH="$HOME/.local/bin:$PATH"   # se ~/.local/bin ainda não estiver no P
 hud --version
 ```
 
-O instalador baixa `hud_linux_<arch>.tar.gz` da release, confere o SHA-256 com
-o `checksums.txt` da mesma release (sem checksum válido, não instala), grava o
-binário de forma atômica em `~/.local/bin/hud` e os avisos de licença de
-terceiros em `~/.local/bin/hud-licenses/`. Ele só usa HTTPS (TLS 1.2+), não lê
-nada do teclado e se recusa a escrever através de um symlink.
+O instalador baixa `hud_<linux|darwin>_<arch>.tar.gz` da release, confere o
+SHA-256 com o `checksums.txt` da mesma release (sem checksum válido, não
+instala; no macOS usa o `shasum -a 256`), grava o binário de forma atômica em
+`~/.local/bin/hud` e os avisos de licença de terceiros em
+`~/.local/bin/hud-licenses/`. Ele só usa HTTPS (TLS 1.2+), não lê nada do
+teclado e se recusa a escrever através de um symlink.
 
-### Variáveis
+#### macOS: Gatekeeper
+
+O binário do macOS não é assinado com um Developer ID nem notarizado pela
+Apple. Instalado pelo `curl | bash`, ele roda normalmente: o `curl` não marca o
+arquivo com o atributo de quarentena, e o instalador ainda remove esse atributo
+(`xattr -d com.apple.quarantine`) por garantia. Se você baixar o
+`hud_darwin_<arch>.tar.gz` pelo navegador e extrair à mão, o Gatekeeper vai
+bloquear o `hud` ("não é possível verificar o desenvolvedor"). Nesse caso:
+
+```bash
+xattr -d com.apple.quarantine ./hud
+```
+
+Num Mac com Apple Silicon, o instalador escolhe o binário arm64 mesmo num
+terminal rodando sob Rosetta.
+
+#### Variáveis
 
 | Variável | Padrão | Para quê |
 |---|---|---|
@@ -94,12 +117,12 @@ less install.sh
 bash install.sh
 ```
 
-### Atualizar
+#### Atualizar
 
 Rode o instalador de novo. Ele troca o binário e os avisos; a configuração
 (`~/.config/hud/`) e os dados (`~/.local/share/hud/`) não são tocados.
 
-### Desinstalar
+#### Desinstalar
 
 ```bash
 rm ~/.local/bin/hud
@@ -107,6 +130,78 @@ rm -r ~/.local/bin/hud-licenses
 ```
 
 A configuração e os dados ficam. Para apagar tudo: `rm -r ~/.config/hud ~/.local/share/hud`.
+
+### Windows
+
+No PowerShell (o Windows PowerShell 5.1 que vem com o Windows ou o PowerShell 7),
+**sem** "Executar como administrador":
+
+```powershell
+irm https://raw.githubusercontent.com/viralabs-dev/hud/main/install.ps1 | iex
+hud --version
+```
+
+O instalador baixa `hud_windows_amd64.zip` da release, confere o SHA-256 com o
+`checksums.txt` da mesma release (`Get-FileHash`; sem checksum válido, não
+instala), extrai só os arquivos esperados (recusa caminhos com `..`, absolutos
+ou com `:`), testa o `hud.exe --version` e só então troca o binário, de forma
+atômica:
+
+- **Onde instala:** `%LOCALAPPDATA%\Programs\hud\hud.exe`, com os avisos de
+  licença em `%LOCALAPPDATA%\Programs\hud\hud-licenses\`. Não pede
+  administrador e se recusa a rodar elevado sem `HUD_INSTALL_DIR` (instalaria
+  no perfil do administrador).
+- **PATH:** acrescenta a pasta ao PATH **do usuário** (`HKCU\Environment`, sem
+  duplicar e preservando as entradas com `%VARIAVEL%`); o PATH da máquina não é
+  tocado. No `irm | iex`, a própria janela já enxerga o `hud`; nos outros
+  casos, abra um terminal novo.
+- Só usa HTTPS com TLS 1.2+, não lê nada do teclado, não mexe na
+  ExecutionPolicy e se recusa a escrever através de symlink ou junction.
+
+As variáveis são as mesmas do Linux (`HUD_VERSION`, `HUD_INSTALL_DIR`,
+`HUD_REPOSITORY`), com o padrão de `HUD_INSTALL_DIR` em
+`%LOCALAPPDATA%\Programs\hud`:
+
+```powershell
+$env:HUD_VERSION = 'v0.6.0'; irm https://raw.githubusercontent.com/viralabs-dev/hud/main/install.ps1 | iex
+```
+
+Para ler o script antes de rodar (modo arquivo):
+
+```powershell
+irm https://raw.githubusercontent.com/viralabs-dev/hud/main/install.ps1 -OutFile install.ps1
+notepad install.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+O `-ExecutionPolicy Bypass` vale só para esse processo; não é preciso (nem
+recomendado) mudar a política do sistema com `Set-ExecutionPolicy`.
+
+**Atualizar:** rode o instalador de novo. Ele troca o `hud.exe` e os avisos; a
+configuração e os dados do HUD não são tocados. Feche o HUD antes: o Windows
+não deixa trocar um `.exe` em uso.
+
+**Desinstalar:**
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/viralabs-dev/hud/main/install.ps1))) -Uninstall
+# ou, com o arquivo baixado:
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall
+```
+
+Isso apaga `hud.exe` e `hud-licenses\`, remove a pasta se ela ficar vazia e
+tira a entrada do PATH do usuário. À mão, dá no mesmo: apague a pasta
+`%LOCALAPPDATA%\Programs\hud` e remova essa entrada em *Configurações → Sistema
+→ Sobre → Configurações avançadas do sistema → Variáveis de Ambiente* (as
+"Variáveis de usuário").
+
+**SmartScreen e antivírus:** o `hud.exe` não é assinado digitalmente. Instalado
+pelo `install.ps1`, o arquivo não recebe a marca de "baixado da internet" e o
+SmartScreen não interfere; se você baixar o `.zip` pelo navegador, o Windows
+pode avisar ("O Windows protegeu o computador"). Alguns antivírus estranham o
+formato do PyInstaller (um `.exe` que se extrai em `%TEMP%` a cada execução);
+se o seu bloquear, confira o SHA-256 do pacote com o `checksums.txt` da release
+antes de liberar.
 
 ### Vindo da instalação antiga (symlink ou pipx)
 
@@ -150,21 +245,36 @@ bin/hud               # roda o código do repositório com python3 -I
 python3 -m unittest discover -s tests -t .
 ```
 
-Para montar o binário localmente (Linux, Python 3.11+ com `_curses` e
-`objdump`):
+No Windows, os testes precisam do `windows-curses`
+(`python -m pip install --require-hashes --only-binary=:all: -r packaging\requirements-test-windows.txt`).
+
+Para montar o binário localmente (Python 3.11+ com `_curses`; no Linux, também
+o `objdump`). O PyInstaller não faz build cruzado: cada sistema e arquitetura é
+montado no próprio. As dependências de build, com versões e hashes fixos, ficam
+em `packaging/requirements-build.txt` (Linux), `requirements-build-macos.txt` e
+`requirements-build-windows.txt` (este com o `windows-curses`):
 
 ```bash
 python3 -m venv /tmp/hud-build
-/tmp/hud-build/bin/pip install --require-hashes -r packaging/requirements-build.txt
+/tmp/hud-build/bin/pip install --require-hashes --only-binary=:all: -r packaging/requirements-build.txt   # ou -macos.txt
 PYTHON=/tmp/hud-build/bin/python scripts/release.sh v$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' hud/__init__.py)
 HUD_BIN=$PWD/build/pyinstaller/dist/hud python3 -m unittest tests.test_ui   # tela contra o binário
 scripts/test-installer.sh dist/hud_linux_amd64.tar.gz                        # instalador contra o pacote
 ```
 
-O glibc mínimo do binário é o do sistema onde ele é montado; por isso a release
-é montada no Ubuntu 22.04. O binário extrai o interpretador numa pasta
-temporária (`$TMPDIR`, ou `/tmp`) a cada execução e apaga ao sair; se o `/tmp`
-for montado com `noexec`, aponte `TMPDIR` para uma pasta que permita execução.
+No Windows, o mesmo `scripts/release.sh` roda no Git Bash (com o Python do venv
+em `Scripts\python.exe`) e gera `dist\hud_windows_amd64.zip`; o smoke é o
+`packaging/smoke.ps1`, e o instalador é testado com
+`pwsh -File scripts/test-installer.ps1 -Package dist\hud_windows_amd64.zip`
+(a mesma bateria roda no `pwsh` do Linux, sem o pacote real). A release junta
+os cinco pacotes num `checksums.txt` só.
+
+O release confere, com `packaging/bibliotecas.py`, que toda biblioteca nativa
+embutida no binário tem licença em `LICENSES/`. O glibc mínimo do binário Linux
+é o do sistema onde ele é montado; por isso a release é montada no Ubuntu
+22.04. O binário extrai o interpretador numa pasta temporária (`$TMPDIR`, ou
+`/tmp`; no Windows, `%TEMP%`) a cada execução e apaga ao sair; se o `/tmp` for
+montado com `noexec`, aponte `TMPDIR` para uma pasta que permita execução.
 
 ## Rodar
 
