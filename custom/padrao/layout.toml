@@ -1,0 +1,27 @@
+# Layout padrão do HUD: o mesmo que vem embutido (DEFAULT).
+# É a referência para copiar: `cp -r custom/padrao custom/meu-layout`, troque o
+# `nome` e mexa à vontade. Para voltar a ele a qualquer hora: `/custom padrao`.
+#
+# A ENTRADA não entra aqui: fica sempre no rodapé, com 3 linhas.
+
+nome = "padrao"
+descricao = "Layout embutido: sistema, comandos, agenda e uso à esquerda; Vault e saída à direita"
+
+# Coluna da esquerda: 36% da largura. A UI ainda limita entre 38 e 56 colunas
+# de terminal.
+[[coluna]]
+largura = 36
+paineis = [
+  { id = "sistema", altura = 11 },  # CPU, memória, disco, rede, temperatura
+  "comandos",                       # altura "auto": número de comandos + 2
+  { id = "agenda", peso = 1 },      # ocupa o que sobrar na coluna
+  { id = "uso_claude", altura = 4 },
+  "uso_codex",                      # altura "auto": janelas do Codex + 2 (mínimo 3)
+]
+
+# Coluna da direita: sem `largura`, fica com o resto.
+[[coluna]]
+paineis = [
+  { id = "vault", peso = 55 },  # 55% da altura livre
+  { id = "saida", peso = 45 },  # 45%; a `saida` é obrigatória em todo layout
+]

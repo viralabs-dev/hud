@@ -1,0 +1,47 @@
+# Monitor: três colunas, com o log do sistema e as portas abertas.
+# Precisa de um terminal largo (cada coluna tem no mínimo 30 colunas).
+#
+# O painel PORTAS roda um comando. Por segurança, ele só roda depois que você
+# confia nesta customização: ao escolher `/custom monitor`, o HUD mostra o argv
+# e pede "s". Se este arquivo mudar, o HUD pede de novo.
+
+nome = "monitor"
+descricao = "Três colunas: sistema e portas, Vault e syslog, saída e uso"
+
+[[coluna]]
+paineis = [
+  { id = "sistema", altura = 11 },
+  "comandos",
+  { id = "portas", peso = 1 },
+]
+
+[[coluna]]
+paineis = [
+  { id = "vault", peso = 40 },
+  { id = "agenda", peso = 20 },
+  { id = "syslog", peso = 40 },
+]
+
+[[coluna]]
+paineis = [
+  { id = "saida", peso = 1 },
+  "uso_claude",
+  "uso_codex",
+]
+
+# Painel do tipo arquivo: as últimas linhas de um arquivo de log.
+[[painel]]
+id = "syslog"
+titulo = "SYSLOG"
+tipo = "arquivo"
+caminho = "/var/log/syslog"
+linhas = 100
+
+# Painel do tipo comando: roda o argv (sem shell) a cada `intervalo` segundos.
+[[painel]]
+id = "portas"
+titulo = "PORTAS"
+tipo = "comando"
+argv = ["ss", "-tulnH"]
+intervalo = 30
+timeout = 10
