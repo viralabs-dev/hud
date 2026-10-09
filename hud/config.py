@@ -75,6 +75,7 @@ class Config:
     source: str = "padrão"
     claude: ClaudeConfig | None = None
     default_vault: Path = Path("~/Vault")
+    custom_dir: Path | None = None  # None = custom/ na raiz do repositório
     folder_source: str = "config"
     codex: CodexConfig | None = None
 
@@ -210,6 +211,8 @@ def load(path: Path | None = None, folder: str | None = None) -> Config:
         source=source,
     )
     cfg.default_vault = cfg.vault
+    if data.get("custom_dir"):
+        cfg.custom_dir = Path(os.path.realpath(os.path.expanduser(str(data["custom_dir"]))))
     # Prioridade: --pasta > a lembrada pelo /pasta > `vault` da config.
     try:
         if folder:

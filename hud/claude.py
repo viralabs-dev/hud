@@ -69,7 +69,8 @@ def allow_rules(cfg: ClaudeConfig) -> list[str]:
     return rules
 
 
-def build_argv(cfg: ClaudeConfig, session_id: str = "", profile: str | None = None) -> list[str]:
+def build_argv(cfg: ClaudeConfig, session_id: str = "", profile: str | None = None,
+               context: str = "") -> list[str]:
     profile = profile or cfg.profile
     deny = [f"{t}({p})" for t in SCOPED_TOOLS for p in SECRETS]
     argv = [cfg.executable, "-p", "--output-format", "stream-json", "--verbose"]
@@ -83,7 +84,7 @@ def build_argv(cfg: ClaudeConfig, session_id: str = "", profile: str | None = No
             argv += ["--add-dir", d]
     argv += ["--disallowedTools", *deny,
              "--max-budget-usd", f"{cfg.max_budget_usd:.2f}",
-             "--append-system-prompt", SYSTEM_PROMPT]
+             "--append-system-prompt", f"{SYSTEM_PROMPT} {context}".strip()]
     if cfg.model:
         argv += ["--model", cfg.model]
     if session_id:
@@ -96,7 +97,7 @@ class Claude(Agent):
     env_prefixes = ("ANTHROPIC_", "CLAUDE_CODE_", "CLAUDE_CONFIG_DIR")
 
     def argv(self) -> list[str]:
-        return build_argv(self.cfg, self.session.id, self.profile)
+        return build_argv(self.cfg, self.session.id, self.profile, self.context)
 
     def handle(self, ev: dict) -> dict | None:
         kind = ev.get("type")

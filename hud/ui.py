@@ -16,11 +16,15 @@ import queue
 import threading
 import time
 from collections import deque
+from dataclasses import dataclass
+from typing import Callable
 from pathlib import Path
 
 from . import agenda as ag
 from .config import Command, Config, ConfigError, remember_folder, validate_folder
 from .metrics import Metrics, human_bytes, human_duration
+from . import custom as cu
+from . import layout as lay
 from . import usage as us
 from .claude import Claude
 from .codex import Codex
@@ -52,6 +56,8 @@ Entrada
   /notas [N] · últimas notas · /conflitos · conflitos de sync do Vault
   /vault · relê a pasta agora · /limpar · limpa a saída · /sair
   /pasta caminho · lê outra pasta local no lugar do Vault (lembrada) · /pasta vault · volta ao Vault
+  /custom lista · customizações · /custom nome · usa · /custom padrao · volta · /custom salvar · grava a proposta do agente
+  Os comandos / do HUD valem em qualquer modo (notas, Claude, Codex); só os do Claude vão para ele.
 Claude Code (laranja) e Codex (cinza)
   /c pergunta · pergunta ao Claude · /x pergunta · pergunta ao Codex (a conversa continua)
   Tab · alterna notas → Claude → Codex: no modo de um agente, texto livre vai para ele
@@ -64,6 +70,14 @@ Claude Code (laranja) e Codex (cinza)
 Segurança
   Só rodam os comandos da lista: sem shell, PATH e ambiente fixos, tempo-limite e saída limitada.
   O HUD nunca escreve no Vault. Texto de fora tem as sequências de escape removidas."""
+
+
+@dataclass
+class Ask:
+    """Pergunta s/N na entrada (o `name` vira o título da caixa)."""
+    name: str
+    yes: Callable[[], None]
+    no: Callable[[], None] | None = None
 
 
 class Hud:
@@ -96,6 +110,20 @@ class Hud:
         self.usage = us.UsageTracker()
         self.codex_usage = us.CodexUsageTracker()
         self.codex_usage.poll()
+        self.custom_root = cfg.custom_dir or cu.custom_root()
+        self.layout: lay.Layout = lay.DEFAULT
+        self.custom_name = ""
+        self.feed: cu.PanelFeed | None = None
+        self.proposals: list[cu.Proposal] = []
+        self.clip: tuple[int, int, int] | None = None  # (y0, y1, x1) do painel em desenho
+        self.layout_note = ""
+        # Os agentes leem as customizações e a skill para propor layouts.
+        self.agent_extra_reads = tuple(str(p) for p in (self.custom_root, cu.skill_dir()) if p and p.is_dir())
+        for agent in self.agents.values():
+            agent.context = cu.agent_context(self.custom_root)
+            if hasattr(agent.cfg, "read_dirs") and agent.cfg.follow_folder:
+                agent.cfg = dataclasses.replace(
+                    agent.cfg, read_dirs=tuple(dict.fromkeys((*agent.cfg.read_dirs, *self.agent_extra_reads))))
 
     # ── saída ────────────────────────────────────────────────────────────
     def say(self, text: str, style: str = "text") -> None:
@@ -122,6 +150,13 @@ class Hud:
         self.vault.start()
         self.say("HUD pronto. Digite /ajuda para ver tudo o que a entrada aceita.", "dim")
         self.say(f"configuração: {self.cfg.source} · dados: {self.cfg.data_dir}", "dim")
+        try:
+            name = cu.remembered(self.cfg.data_dir)
+        except Exception as e:  # noqa: BLE001 — arquivo estranho não impede a tela
+            name = None
+            self.say(f"customização lembrada ignorada: {e}", "warn")
+        if name:
+            self.use_custom(name, startup=True)
         for w in self.cfg.warnings:
             self.say(f"⚠ {w}", "warn")
         last_sample = 0.0
@@ -153,6 +188,8 @@ class Hud:
             pass
         finally:
             self.vault.stop()
+            if self.feed:
+                self.feed.stop()
             for agent in self.agents.values():
                 agent.stop()
 
@@ -180,6 +217,11 @@ class Hud:
                     self.say(f"✗ {cmd.name} · código {rc} · {dur:.1f}s{extra}", "warn")
             elif kind == "agent_text":
                 self.say(ev[2], ev[1])
+                found = cu.parse_proposals(ev[2])
+                if found:
+                    self.proposals = found
+                    nomes = ", ".join(sorted({f"{p.nome}/{p.arquivo}" for p in found}))
+                    self.say(f"✦ proposta de customização: {nomes} · /custom salvar para gravar", "ok")
             elif kind == "agent_tool":
                 self.say(f"  ⚙ {ev[2]}", f"{ev[1]}_dim")
             elif kind == "agent_denied":
@@ -242,6 +284,11 @@ class Hud:
     # ── desenho ──────────────────────────────────────────────────────────
     def put(self, y: int, x: int, s: str, style: str | int = "text", w: int | None = None) -> int:
         H, W = self.scr.getmaxyx()
+        if self.clip:
+            y0, y1, x1 = self.clip
+            if y < y0 or y >= y1:
+                return x
+            W = min(W, x1)
         if y < 0 or y >= H or x >= W:
             return x
         room = W - x if w is None else min(w, W - x)
@@ -280,25 +327,32 @@ class Hud:
             self.put(1, 0, "Aumente a janela ou Ctrl+C para sair.", "dim")
             scr.refresh()
             return
-        lw = max(38, min(56, W * 36 // 100))
-        rw = W - lw
         body = H - 3
-        sys_h = 11
-        use_h = 4
         cx = self.codex_usage.current
-        cdx_h = max(3, len(cx.windows) + 2) if cx and cx.windows else 4
-        cmd_h = min(len(self.cfg.commands) + 2, max(4, body - sys_h - use_h - cdx_h - 5))
-        ag_h = body - sys_h - cmd_h - use_h - cdx_h
-        vault_h = max(10, body * 55 // 100)
-        out_h = body - vault_h
-
-        self.draw_system(0, 0, sys_h, lw)
-        self.draw_commands(sys_h, 0, cmd_h, lw)
-        self.draw_agenda(sys_h + cmd_h, 0, ag_h, lw)
-        self.draw_usage(sys_h + cmd_h + ag_h, 0, use_h, lw)
-        self.draw_usage_codex(sys_h + cmd_h + ag_h + use_h, 0, cdx_h, lw)
-        self.draw_vault(0, lw, vault_h, rw)
-        self.draw_output(vault_h, lw, out_h, rw)
+        auto = {"comandos": len(self.cfg.commands) + 2,
+                "uso_codex": max(3, len(cx.windows) + 2) if cx and cx.windows else 3}
+        self.layout_note = ""
+        try:
+            rects = lay.compute(self.layout, W, body, auto)
+        except lay.TooSmall:
+            self.layout_note = f"“{self.custom_name}” não cabe em {W}×{H}: usando o padrão"
+            try:
+                rects = lay.compute(lay.DEFAULT, W, body, auto)
+            except lay.TooSmall:
+                rects = {}
+        draw = {"sistema": self.draw_system, "comandos": self.draw_commands,
+                "agenda": self.draw_agenda, "uso_claude": self.draw_usage,
+                "uso_codex": self.draw_usage_codex, "vault": self.draw_vault,
+                "saida": self.draw_output}
+        for pid, (y, x, h, w) in rects.items():
+            self.clip = (y, y + h, x + w)
+            try:
+                if pid in draw:
+                    draw[pid](y, x, h, w)
+                else:
+                    self.draw_custom(pid, y, x, h, w)
+            finally:
+                self.clip = None
         cy, cx = self.draw_input(body, 0, 3, W)
         try:
             scr.move(cy, cx)
@@ -504,6 +558,118 @@ class Hud:
         for i, (label, win) in enumerate((("5h", u.five_hour), ("semana", u.seven_day))):
             self.usage_row(y + 1 + i, x, w, label, win.left, win.resets_at)
 
+    def draw_custom(self, pid: str, y: int, x: int, h: int, w: int) -> None:
+        spec = self.layout.paineis.get(pid)
+        if not spec:
+            return
+        status = self.feed.status(pid) if self.feed else ""
+        self.box(y, x, h, w, spec.titulo, status)
+        lines = self.feed.lines(pid) if self.feed else []
+        room = h - 2
+        shown = lines[:room] if spec.tipo == "texto" else lines[-room:]
+        style = "warn" if status == "não confiado" else "text"
+        for i, line in enumerate(shown):
+            self.put(y + 1 + i, x + 2, line, style, w - 4)
+        if not shown:
+            self.put(y + 1, x + 2, "(vazio)" if status != "não confiado" else
+                     f"comando não confiado: /custom {self.custom_name} para revisar", "dim", w - 4)
+
+    def apply_layout(self, layout: lay.Layout, name: str, trusted: bool) -> None:
+        if self.feed:
+            self.feed.stop()
+        self.feed = None
+        self.layout, self.custom_name = layout, name
+        if layout.paineis:
+            base = self.custom_root / name if name else None
+            self.feed = cu.PanelFeed(layout, base, trusted)
+            self.feed.start()
+
+    def use_custom(self, name: str, startup: bool = False) -> None:
+        try:
+            layout = cu.load_custom(self.custom_root, name)
+            dig = cu.digest(self.custom_root, name)
+        except (lay.LayoutError, OSError) as e:
+            self.say(f"customização “{name}”: {e}", "warn")
+            return
+        cmds = cu.needs_trust(layout)
+        trust = cu.Trust(self.cfg.data_dir)
+        for aviso in layout.avisos:
+            self.say(f"  aviso: {aviso}", "dim")
+
+        def done(trusted: bool) -> None:
+            self.apply_layout(layout, name, trusted)
+            try:
+                cu.remember(self.cfg.data_dir, name)
+            except OSError as e:
+                self.say(f"não consegui lembrar a customização: {e}", "warn")
+            extra = "" if trusted or not cmds else " · comandos desligados até confiar"
+            self.say(f"customização: {name}{extra}", "ok")
+
+        if not cmds or trust.is_trusted(name, dig):
+            done(True)
+            return
+        if startup:
+            done(False)
+            self.say(f"“{name}” mudou ou ainda não foi confiada: /custom {name} para revisar os comandos", "warn")
+            return
+        self.header(f"“{name}” quer rodar {len(cmds)} comando(s) a cada intervalo:")
+        for argv in cmds:
+            self.say("  $ " + " ".join([os.path.basename(argv[0]), *argv[1:]]), "warn")
+        self.say("s = confiar e ativar · outra tecla = usar sem os comandos", "dim")
+
+        def yes() -> None:
+            try:
+                trust.trust(name, dig)
+            except OSError as e:
+                self.say(f"não consegui gravar a confiança: {e}", "warn")
+            done(True)
+
+        self.pending = Ask(f"confiar nos comandos de {name}", yes, lambda: done(False))
+
+    def custom_cmd(self, arg: str) -> None:
+        sub = arg.split()[0].lower() if arg else ""
+        if not sub:
+            atual = self.custom_name or "padrao (embutido)"
+            self.say(f"customização: {atual} · pasta: {self.custom_root} · /custom lista · /custom <nome> · /custom padrao · /custom salvar", "dim")
+        elif sub == "lista":
+            self.header(f"customizações em {self.custom_root}")
+            items = cu.list_customs(self.custom_root) if self.custom_root.is_dir() else []
+            if not items:
+                self.say("nenhuma ainda · peça a um agente: “crie uma customização …” (skill hud-custom)", "dim")
+            for nome, desc, erro in items:
+                mark = "●" if nome == self.custom_name else " "
+                self.say(f"{mark} {nome:<16} {erro and '✗ ' + erro or desc}", "warn" if erro else "accent" if mark == "●" else "text")
+        elif sub in ("padrao", "padrão"):
+            self.apply_layout(lay.DEFAULT, "", True)
+            try:
+                cu.remember(self.cfg.data_dir, None)
+            except OSError:
+                pass
+            self.say("customização: padrão embutido", "ok")
+        elif sub == "salvar":
+            self.save_proposals()
+        elif cu.valid_name(sub):
+            self.use_custom(sub)
+        else:
+            self.say(f"nome inválido: {sub} (letras minúsculas, números, - e _)", "warn")
+
+    def save_proposals(self, overwrite: bool = False) -> None:
+        if not self.proposals:
+            self.say("nenhuma proposta pendente · peça a um agente (skill hud-custom) e depois /custom salvar", "dim")
+            return
+        try:
+            nome, files = cu.save_proposals(self.custom_root, self.proposals, sobrescrever=overwrite)
+        except cu.AlreadyExists:
+            nome = self.proposals[0].nome
+            self.pending = Ask(f"sobrescrever a customização {nome}", lambda: self.save_proposals(True))
+            return
+        except (lay.LayoutError, OSError) as e:
+            self.say(f"proposta recusada: {e}", "warn")
+            return
+        self.proposals = []
+        self.say(f"✓ customização {nome} gravada ({', '.join(files)}) em {self.custom_root / nome}", "ok")
+        self.say(f"/custom {nome} para usar", "dim")
+
     def usage_row(self, r: int, x: int, w: int, label: str, left: float, resets_at) -> None:
         glyph = {"full": "██", "part": "▒▒", "empty": "░░"}
         st = us.level(left)
@@ -540,7 +706,7 @@ class Hud:
             hint = "Alt+1 notas · Alt+2/3 agentes · /perfil · /novo · /parar"
         else:
             title = "ENTRADA" + "".join(f" · {n} {spin}" for n in busy)
-            hint = "texto = nota · Alt+2 Claude · Alt+3 Codex · /ajuda"
+            hint = self.layout_note or "texto = nota · Alt+2 Claude · Alt+3 Codex · /ajuda"
         self.box(y, x, h, w, title, hint, color)
         if agent and agent.profile == "completo":
             self.put(y, x + 4 + width(title) + 2, " ⚠ ferramentas completas ", "warn")
@@ -562,11 +728,21 @@ class Hud:
             self.mouse()
             return
         if self.pending:
-            cmd, self.pending = self.pending, None
-            if ch in ("s", "S", "y", "Y"):
-                self.launch(cmd, confirmed=True)
+            if ch == curses.KEY_RESIZE:
+                return
+            item, self.pending = self.pending, None
+            yes = ch in ("s", "S", "y", "Y")
+            if isinstance(item, Ask):
+                if yes:
+                    item.yes()
+                elif item.no:
+                    item.no()
+                else:
+                    self.say(f"{item.name}: cancelado", "dim")
+            elif yes:
+                self.launch(item, confirmed=True)
             else:
-                self.say(f"{cmd.name}: cancelado", "dim")
+                self.say(f"{item.name}: cancelado", "dim")
             return
         if ch == curses.KEY_RESIZE:
             return
@@ -768,6 +944,8 @@ class Hud:
             else:
                 self.say("  ".join("/" + c for c in cmds), "claude")
                 self.say("no modo Claude, digite o comando direto; nomes que o HUD usa vão com //", "dim")
+        elif verb == "/custom":
+            self.custom_cmd(arg)
         elif verb == "/pasta":
             self.change_folder(arg)
         elif verb == "/vault":
@@ -803,7 +981,8 @@ class Hud:
         for name, agent in self.agents.items():
             if not agent.cfg.follow_folder:
                 continue
-            extra = {"read_dirs": (str(target),)} if hasattr(agent.cfg, "read_dirs") else {}
+            extra = ({"read_dirs": (str(target), *self.agent_extra_reads)}
+                     if hasattr(agent.cfg, "read_dirs") else {})
             agent.cfg = dataclasses.replace(agent.cfg, cwd=str(target), **extra)
             agent.new_session()
             moved.append(name)

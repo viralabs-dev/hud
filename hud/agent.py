@@ -67,6 +67,7 @@ class Agent:
         self.cfg = cfg
         self.events = events
         self.profile = cfg.profile
+        self.context = ""  # o que o HUD conta ao agente (skill hud-custom, pasta custom/)
         self.session = Session()
         self.proc: subprocess.Popen | None = None
         self.started = 0.0
@@ -84,6 +85,10 @@ class Agent:
     def finish(self, result: dict) -> tuple[bool, str, str]:
         """(ok, mensagem de erro, resumo) a partir do evento final."""
         raise NotImplementedError
+
+    def prepare(self, prompt: str) -> str:
+        """Ajuste do prompt antes de enviar (o Codex não tem prompt de sistema)."""
+        return prompt
 
     def emit(self, kind: str, *args) -> None:
         self.events.put((kind, self.name, *args))
@@ -119,7 +124,8 @@ class Agent:
             self.emit("agent_end", False, f"não consegui iniciar: {e.strerror}", None, "")
             return False
         self.proc, self.started, self.stopped = proc, time.monotonic(), False
-        threading.Thread(target=self._work, args=(proc, prompt[:MAX_PROMPT]), daemon=True).start()
+        prompt = self.prepare(prompt[:MAX_PROMPT])
+        threading.Thread(target=self._work, args=(proc, prompt), daemon=True).start()
         return True
 
     def _work(self, proc: subprocess.Popen, prompt: str) -> None:

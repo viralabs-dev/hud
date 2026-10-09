@@ -46,6 +46,11 @@ class Codex(Agent):
     def argv(self) -> list[str]:
         return build_argv(self.cfg, self.session.id, self.profile)
 
+    def prepare(self, prompt: str) -> str:
+        if self.context and not self.session.id:
+            return f"[Contexto do HUD: {self.context}]\n\n{prompt}"
+        return prompt
+
     def handle(self, ev: dict) -> dict | None:
         kind = ev.get("type")
         if kind == "thread.started" and ev.get("thread_id"):

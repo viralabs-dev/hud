@@ -498,3 +498,21 @@ class PanelFeed:
             with self._lock:
                 self._st[pid].running = False
                 self._st[pid].proc = None
+
+
+def skill_dir() -> Path | None:
+    """A skill hud-custom do repositório (a mesma ligada em ~/.claude e ~/.codex)."""
+    p = Path(__file__).resolve().parent.parent / "skills" / "hud-custom"
+    return p if (p / "SKILL.md").is_file() else None
+
+
+def agent_context(root: Path) -> str:
+    """O que o Claude e o Codex precisam saber para propor customizações de dentro do HUD."""
+    skill = skill_dir()
+    where = f" ({skill / 'SKILL.md'})" if skill else ""
+    return (
+        f"Você está dentro do HUD de terminal. Para mudar o layout do HUD, siga a skill "
+        f"hud-custom{where}; as customizações ficam em {root}. Dentro do HUD não grave "
+        "arquivos: responda com um bloco ```hud-custom nome=<nome> arquivo=<arquivo> por "
+        "arquivo e diga ao usuário para digitar /custom salvar e depois /custom <nome>."
+    )

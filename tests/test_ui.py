@@ -66,10 +66,40 @@ for ev in (
     {"type": "system", "subtype": "init", "session_id": "s1", "model": "m",
      "slash_commands": ["review", "context"]},
     {"type": "assistant", "message": {"content": [{"type": "text", "text": "resposta falsa"}]}},
+    *([{"type": "assistant", "message": {"content": [{"type": "text", "text": PROPOSTA_JSON}]}}]
+      if "PROPOSTA" in data else []),
     {"type": "result", "subtype": "success", "is_error": False, "session_id": "s1",
      "total_cost_usd": 0.01},
 ):
     print(json.dumps(ev), flush=True)
+"""
+
+# O que o agente responde quando segue a skill hud-custom dentro do HUD.
+PROPOSTA_TEXTO = """Pronto:
+
+```hud-custom nome=proposta arquivo=layout.toml
+nome = "proposta"
+descricao = "Proposta vinda do agente falso"
+[[coluna]]
+paineis = ["sistema", "uso_claude"]
+[[coluna]]
+paineis = ["saida"]
+```
+
+Digite /custom salvar e depois /custom proposta."""
+
+LAYOUT_ECO = """nome = "eco"
+descricao = "Painel de comando para testar a confiança"
+[[coluna]]
+paineis = ["sistema", "eco"]
+[[coluna]]
+paineis = ["saida", "vault"]
+[[painel]]
+id = "eco"
+titulo = "ECO PROPRIO"
+tipo = "comando"
+argv = ["echo", "saida-do-painel-eco"]
+intervalo = 5
 """
 
 FAKE_CODEX = """#!/usr/bin/env python3
@@ -197,7 +227,8 @@ class UiTest(unittest.TestCase):
         for name, src, log in (("claude", FAKE_CLAUDE, cls.claude_log),
                                ("codex", FAKE_CODEX, cls.codex_log)):
             exe = bindir / name
-            exe.write_text(src.replace("LOG", json.dumps(str(log))), encoding="utf-8")
+            exe.write_text(src.replace("LOG", json.dumps(str(log)))
+                           .replace("PROPOSTA_JSON", json.dumps(PROPOSTA_TEXTO)), encoding="utf-8")
             os.chmod(exe, 0o700)
         cls.claude_exe, cls.codex_exe = bindir / "claude", bindir / "codex"
         cls.env = {
@@ -211,6 +242,10 @@ class UiTest(unittest.TestCase):
             "CLAUDE_CONFIG_DIR": str(cls.tmp / "claude-config"),
             "ESCDELAY": "25",
         }
+        cls.custom = cls.tmp / "custom"
+        (cls.custom / "eco").mkdir(parents=True)
+        (cls.custom / "eco" / "layout.toml").write_text(LAYOUT_ECO, encoding="utf-8")
+        shutil.copytree(ROOT / "custom" / "foco", cls.custom / "foco")
         cls.n = 0
 
     @classmethod
@@ -227,6 +262,7 @@ vault = {q(str(self.vault))}
 data_dir = {q(str(self.data))}
 refresh_seconds = 1
 vault_scan_seconds = 2
+custom_dir = {q(str(self.custom))}
 
 [[command]]
 name = "Eco"
@@ -367,7 +403,11 @@ executable = {q(str(self.codex_exe))}
         self.hud.wait_for("oi codex falso")
         self.hud.wait_for("✓ codex")
         calls = self.calls(self.codex_log)
-        self.assertEqual(calls[0]["stdin"], "pergunta codex")
+        # Primeira pergunta da conversa: o Codex não tem prompt de sistema, então o
+        # contexto do HUD (skill hud-custom) vem antes do texto do usuário.
+        self.assertTrue(calls[0]["stdin"].startswith("[Contexto do HUD:"))
+        self.assertIn("hud-custom", calls[0]["stdin"])
+        self.assertTrue(calls[0]["stdin"].endswith("\n\npergunta codex"))
         self.assertEqual(calls[0]["argv"][:1], ["exec"])
         self.assertEqual(calls[0]["argv"][-1], "-")
         self.assertNotIn("pergunta codex", calls[0]["argv"])
@@ -393,6 +433,45 @@ executable = {q(str(self.codex_exe))}
         self.hud.wait_for("VAULT · ao vivo")
         self.assertNotIn("PASTA · outra-pasta", self.hud.screen.text())
         self.assertFalse((self.data / "pasta").exists())
+
+    def test_11_custom_lista_usa_confia_e_volta(self):
+        self.hud.send(ALT[2])  # os comandos / do HUD valem também no modo Claude
+        self.hud.type("/custom lista")
+        self.hud.wait_for("foco")
+        self.hud.wait_for("eco")
+        self.hud.type("/custom foco")
+        self.hud.wait_for("LEMBRETES")
+        self.assertEqual((self.data / "custom").read_text(encoding="utf-8").strip(), "foco")
+        self.assertEqual(self.calls(self.claude_log), [])  # nada foi para o agente
+        # Painel de comando: recusar mantém desligado; aceitar roda e grava a confiança.
+        self.hud.type("/custom eco")
+        self.hud.wait_for("confiar nos comandos de eco")
+        self.hud.send("n")
+        self.hud.wait_for("ECO PROPRIO")
+        self.hud.wait_for("não confiado")
+        # O comando aparece na SAÍDA (“$ echo …”) para revisão; no painel, nada rodou.
+        self.assertNotIn("│ saida-do-painel-eco", self.hud.screen.text())
+        self.hud.type("/custom eco")
+        self.hud.wait_for("confiar nos comandos de eco")
+        self.hud.send("s")
+        self.hud.wait_for("│ saida-do-painel-eco")
+        self.assertIn("eco", json.loads((self.data / "custom_confianca.json").read_text()))
+        self.hud.type("/custom padrao")
+        self.hud.wait_for("AGENDA")
+        self.assertFalse((self.data / "custom").exists())
+
+    def test_12_proposta_do_agente_vira_customizacao(self):
+        self.hud.send(ALT[2])
+        self.hud.type("me faça uma PROPOSTA")
+        self.hud.wait_for("proposta de customização")
+        self.hud.type("/custom salvar")
+        self.hud.wait_for("customização proposta gravada")
+        layout = self.custom / "proposta" / "layout.toml"
+        self.assertTrue(layout.is_file())
+        self.assertEqual(stat.S_IMODE(layout.stat().st_mode), 0o644)
+        self.hud.type("/custom proposta")
+        self.hud.wait_for(lambda s: "AGENDA" not in s.text() and "SAÍDA" in s.text(), what="layout da proposta")
+        shutil.rmtree(self.custom / "proposta")
 
     def test_08_roda_do_mouse_rola_a_saida(self):
         self.hud.type("/ajuda")
