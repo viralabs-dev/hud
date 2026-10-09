@@ -58,7 +58,12 @@ a = Analysis(
     [os.path.join(SPECPATH, "hud_entry.py")],
     pathex=[ROOT],
     binaries=[],
-    datas=[],
+    # Os modelos de custom/ e a skill hud-custom, somente leitura, no mesmo lugar
+    # do pacote do pipx (hud/_modelos e hud/_skill; ver hud/custom.py).
+    datas=[
+        (os.path.join(ROOT, "custom"), os.path.join("hud", "_modelos")),
+        (os.path.join(ROOT, "skills", "hud-custom"), os.path.join("hud", "_skill")),
+    ],
     hiddenimports=HIDDEN,
     hookspath=[],
     hooksconfig={},

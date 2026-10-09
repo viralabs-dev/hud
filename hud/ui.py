@@ -122,7 +122,8 @@ class Hud:
         self.clip: tuple[int, int, int] | None = None  # (y0, y1, x1) do painel em desenho
         self.layout_note = ""
         # Os agentes leem as customizações e a skill para propor layouts.
-        self.agent_extra_reads = tuple(str(p) for p in (self.custom_root, cu.skill_dir()) if p and p.is_dir())
+        self.agent_extra_reads = tuple(str(p) for p in (self.custom_root, cu.templates_root(), cu.skill_dir())
+                                       if p and p.is_dir())
         for agent in self.agents.values():
             agent.context = cu.agent_context(self.custom_root)
             if hasattr(agent.cfg, "read_dirs") and agent.cfg.follow_folder:
@@ -604,7 +605,7 @@ class Hud:
         self.feed = None
         self.layout, self.custom_name = layout, name
         if layout.paineis:
-            base = self.custom_root / name if name else None
+            base = cu.find(self.custom_root, name) if name else None
             self.feed = cu.PanelFeed(layout, base, trusted)
             self.feed.start()
 
@@ -657,11 +658,12 @@ class Hud:
             self.say(f"customização: {atual} · pasta: {self.custom_root} · /custom lista · /custom <nome> · /custom padrao · /custom salvar", "dim")
         elif sub == "lista":
             self.header(f"customizações em {self.custom_root}")
-            items = cu.list_customs(self.custom_root) if self.custom_root.is_dir() else []
+            items = cu.list_customs(self.custom_root)
             if not items:
                 self.say("nenhuma ainda · peça a um agente: “crie uma customização …” (skill hud-custom)", "dim")
-            for nome, desc, erro in items:
+            for nome, desc, erro, embutido in items:
                 mark = "●" if nome == self.custom_name else " "
+                desc = f"{desc} (vem com o HUD)" if embutido else desc
                 self.say(f"{mark} {nome:<16} {erro and '✗ ' + erro or desc}", "warn" if erro else "accent" if mark == "●" else "text")
         elif sub in ("padrao", "padrão"):
             self.apply_layout(lay.DEFAULT, "", True)

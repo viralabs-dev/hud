@@ -345,8 +345,9 @@ aparecem na agenda com ◆ e são somente leitura.
 
 ## Customização
 
-Cada customização é uma pasta `custom/<nome>/` na raiz do repositório, para ser
-compartilhada por commit/PR. O `layout.toml` diz em que coluna e em que ordem
+Cada customização é uma pasta `custom/<nome>/` (no repositório, para ser
+compartilhada por commit/PR; numa instalação pelo binário, na pasta de dados, veja
+abaixo). O `layout.toml` diz em que coluna e em que ordem
 fica cada painel (`sistema`, `comandos`, `agenda`, `uso_claude`, `uso_codex`,
 `vault`, `saida`) e a altura de cada um; `[[painel]]` cria painéis próprios:
 
@@ -361,13 +362,26 @@ e `monitor` (três colunas, syslog e portas). `/custom lista` mostra todos;
 `/custom foco` usa; `/custom padrao` volta. Fora do HUD, `hud --custom-check
 <nome>` valida uma pasta.
 
+Os modelos vêm dentro do binário e do pacote do pipx, só para leitura. As suas
+customizações ficam em `~/.local/share/hud/custom/` (Linux e macOS) ou
+`%LOCALAPPDATA%\hud\custom\` (Windows); rodando do repositório, em `custom/`.
+Uma customização sua com o nome de um modelo vale no lugar dele.
+
 **Painel de comando de terceiros não roda sem você ver:** ao escolher uma
 customização com `comando`, o HUD mostra os argv e pede `s`; a confiança fica
 registrada pelo sha256 do `layout.toml` e volta a ser pedida se o arquivo mudar.
 Sem confiar, o layout é usado com esses painéis desligados.
 
 **Com o Claude ou o Codex:** a skill `hud-custom` (`skills/hud-custom/SKILL.md`)
-ensina os dois a montar customizações. Para instalar nos dois:
+ensina os dois a montar customizações. Para instalar nos dois (copia a skill
+para `~/.claude/skills` e `~/.codex/skills`, onde a pasta do agente existir;
+repita depois de atualizar o HUD):
+
+```bash
+hud --instalar-skill
+```
+
+Rodando do repositório, prefira o link, que acompanha o `git pull`:
 
 ```bash
 ln -s ~/dev/hud/skills/hud-custom ~/.claude/skills/hud-custom
@@ -377,7 +391,7 @@ ln -s ~/dev/hud/skills/hud-custom ~/.codex/skills/hud-custom
 Dentro do HUD peça, por exemplo, "deixe a saída maior e ponha o uso embaixo": o
 agente responde com a proposta (blocos `hud-custom`), sem gravar nada; você
 grava com `/custom salvar` e usa com `/custom <nome>`. Fora do HUD, o agente
-grava direto em `custom/<nome>/`. A pasta `custom/` vai para um repositório
+grava direto na pasta das customizações. A pasta `custom/` vai para um repositório
 público: nada de credencial, token ou caminho pessoal num `layout.toml`.
 
 ## Claude Code e Codex

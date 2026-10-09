@@ -40,6 +40,14 @@ chmod 600 "$cfg"
 echo "== hud --check"
 (cd "$dir" && env -i PATH=/usr/bin:/bin HOME="$dir/home" "$bin" --check -c "$cfg")
 
+echo "== modelos e skill embutidos"
+out="$(cd "$dir" && env -i PATH=/usr/bin:/bin HOME="$dir/home" "$bin" --custom-check foco -c "$cfg")"
+grep -q '^OK: foco ' <<<"$out" || { echo "$out" >&2; echo 'FALHOU: o modelo foco não veio no binário' >&2; exit 1; }
+mkdir -p "$dir/home/.claude"
+(cd "$dir" && env -i PATH=/usr/bin:/bin HOME="$dir/home" "$bin" --instalar-skill)
+grep -q '^name: hud-custom' "$dir/home/.claude/skills/hud-custom/SKILL.md" ||
+  { echo 'FALHOU: hud --instalar-skill não instalou a skill' >&2; exit 1; }
+
 echo "== isolamento (módulos plantados)"
 for mod in re json curses os sys locale argparse pathlib tomllib subprocess threading \
            sitecustomize usercustomize; do

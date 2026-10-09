@@ -118,6 +118,15 @@ enabled = false
     if (-not (Test-CheckOk $r)) { Fail "hud --check saiu com erro ($($r.Code))" $r.Out }
     Write-Output $r.Out.TrimEnd()
 
+    Write-Output '== modelos e skill embutidos'
+    $r = Invoke-Hud @('--custom-check', 'foco', '-c', $cfg)
+    if ($r.Code -ne 0 -or $r.Out -notmatch '(?m)^OK: foco ') { Fail 'o modelo foco nao veio no binario' $r.Out }
+    New-Item -ItemType Directory -Path (Join-Path $homeDir '.claude') | Out-Null
+    $r = Invoke-Hud @('--instalar-skill')
+    $skill = [IO.Path]::Combine($homeDir, '.claude', 'skills', 'hud-custom', 'SKILL.md')
+    if ($r.Code -ne 0 -or -not (Test-Path -LiteralPath $skill)) { Fail 'hud --instalar-skill nao instalou a skill' $r.Out }
+    Write-Output $r.Out.TrimEnd()
+
     Write-Output '== isolamento (modulos plantados)'
     $mods = 're json curses os sys locale argparse pathlib tomllib subprocess threading ctypes sitecustomize usercustomize'.Split(' ')
     foreach ($mod in $mods) {

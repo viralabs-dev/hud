@@ -396,12 +396,82 @@ class ListTest(unittest.TestCase):
             (root / "vazia").mkdir()
             symlink(self, root / "b-ok", root / "c-link")
             (root / "solto.txt").write_text("x")
-            got = cu.list_customs(root)
+            with mock.patch.object(cu, "templates_root", return_value=None):
+                got = cu.list_customs(root)
             self.assertEqual([g[0] for g in got], ["a-ruim", "b-ok", "c-link", "vazia"])
             self.assertIn("TOML", got[0][2])
-            self.assertEqual(got[1][1:], ("teste", None))
+            self.assertEqual(got[1][1:], ("teste", None, False))
             self.assertIsNotNone(got[2][2])
             self.assertIsNotNone(got[3][2])
+
+
+class EmbutidosTest(unittest.TestCase):
+    """Binário e pipx: os modelos e a skill vêm em hud/_modelos e hud/_skill."""
+
+    def pacote(self, d):
+        pkg = Path(d) / "pkg" / "hud"
+        (pkg / "_modelos" / "foco").mkdir(parents=True)
+        (pkg / "_modelos" / "foco" / "layout.toml").write_text(LAYOUT)
+        (pkg / "_modelos" / "foco" / "notas.md").write_text("# modelo\n")
+        (pkg / "_skill").mkdir()
+        (pkg / "_skill" / "SKILL.md").write_text("---\nname: hud-custom\n---\n")
+        return pkg
+
+    def test_modelos_embutidos(self):
+        with tempfile.TemporaryDirectory() as d:
+            pkg = self.pacote(d)
+            root = Path(d) / "usuario"
+            with mock.patch.object(cu, "_PACOTE", pkg):
+                self.assertEqual(cu.templates_root(), pkg / "_modelos")
+                self.assertEqual(cu.find(root, "foco"), pkg / "_modelos" / "foco")
+                self.assertEqual(cu.load_custom(root, "foco").descricao, "teste")
+                self.assertEqual(cu.list_customs(root), [("foco", "teste", None, True)])
+                self.assertEqual(cu.find(root, "outro"), root / "outro")
+                # A do usuário com o mesmo nome cobre o modelo; gravar vai sempre para a do usuário.
+                cu.save_proposals(root, [cu.Proposal("foco", "layout.toml", LAYOUT.replace("teste", "minha"))])
+                self.assertEqual(cu.find(root, "foco"), root / "foco")
+                self.assertEqual(cu.list_customs(root), [("foco", "minha", None, False)])
+                self.assertEqual((pkg / "_modelos" / "foco" / "layout.toml").read_text(), LAYOUT)
+                with self.assertRaises(cu.CustomError):
+                    cu.find(root, "../_modelos")
+            with mock.patch.object(cu, "_PACOTE", Path(d) / "nada" / "hud"):
+                self.assertIsNone(cu.templates_root())
+                self.assertIsNone(cu.skill_dir())
+
+    def test_instalar_skill(self):
+        with tempfile.TemporaryDirectory() as d:
+            pkg = self.pacote(d)
+            home = Path(d) / "home"
+            (home / ".claude").mkdir(parents=True)
+            (home / ".codex" / "skills").mkdir(parents=True)
+            symlink(self, pkg / "_skill", home / ".codex" / "skills" / "hud-custom")
+            targets = [home / ".claude" / "skills" / "hud-custom",
+                       home / ".codex" / "skills" / "hud-custom",
+                       home / ".outro" / "skills" / "hud-custom"]
+            with mock.patch.object(cu, "_PACOTE", pkg):
+                got = cu.install_skill(targets)
+                self.assertEqual([ok for *_, ok in got], [True, True, False])
+                self.assertIn("instalada", got[0][1])
+                self.assertIn("link", got[1][1])
+                self.assertIn("pulado", got[2][1])
+                self.assertEqual((targets[0] / "SKILL.md").read_text(), "---\nname: hud-custom\n---\n")
+                if not WINDOWS:
+                    self.assertEqual(stat.S_IMODE((targets[0] / "SKILL.md").stat().st_mode), 0o644)
+                cu.install_skill(targets[:1])  # repetir atualiza
+                (targets[0] / "SKILL.md").unlink()
+                symlink(self, "/etc/passwd", targets[0] / "SKILL.md")
+                with self.assertRaises(cu.CustomError):
+                    cu.install_skill(targets[:1])
+            self.assertFalse((home / ".outro").exists())
+            with mock.patch.object(cu, "_PACOTE", Path(d) / "nada" / "hud"):
+                with self.assertRaises(cu.CustomError):
+                    cu.install_skill(targets[:1])
+
+    def test_skill_targets(self):
+        t = cu.skill_targets({"CLAUDE_CONFIG_DIR": "/c", "CODEX_HOME": "/x"})
+        self.assertEqual(t, [Path("/c/skills/hud-custom"), Path("/x/skills/hud-custom")])
+        t = cu.skill_targets({})
+        self.assertEqual(t, [Path.home() / ".claude/skills/hud-custom", Path.home() / ".codex/skills/hud-custom"])
 
 
 class PanelFeedTest(unittest.TestCase):

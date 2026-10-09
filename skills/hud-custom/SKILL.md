@@ -254,9 +254,18 @@ Para usar, digite `/custom salvar` e depois `/custom foco`.
 ## Fora do HUD
 
 Num terminal comum (Claude Code ou Codex fora do HUD), grave os arquivos
-direto em `<raiz do repositório>/custom/<nome>/`. A raiz é a pasta do
-repositório `viralabs-dev/hud`, normalmente `~/dev/hud` (é a pasta que tem o
-`pyproject.toml` e a pasta `hud/`).
+direto na pasta das customizações do usuário, em `custom/<nome>/`:
+
+- **HUD rodando do repositório** `viralabs-dev/hud` (normalmente `~/dev/hud`,
+  a pasta que tem o `pyproject.toml` e a pasta `hud/`): `<repositório>/custom/`.
+- **HUD instalado pelo binário ou pelo pipx:** `~/.local/share/hud/custom/` no
+  Linux e no macOS, `%LOCALAPPDATA%\hud\custom\` no Windows (ou o
+  `custom_dir` do `config.toml`, se houver). `hud --custom-check padrao`
+  mostra o caminho em uso.
+
+Os modelos `padrao`, `foco` e `monitor` vêm dentro do HUD, só para leitura.
+Para mudar um deles, copie-o para a pasta do usuário com o mesmo nome (ou
+outro): a do usuário passa a valer no lugar do modelo.
 
 1. Crie `custom/<nome>/layout.toml` (e os `.md`/`.txt` dos painéis `texto`).
 2. Valide: `hud --custom-check <nome>` (ou, de dentro do repositório,

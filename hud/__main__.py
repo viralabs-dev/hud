@@ -27,6 +27,8 @@ def main() -> int:
     p.add_argument("-p", "--pasta", help="pasta local para ler ao vivo no lugar do Vault (só nesta execução)")
     p.add_argument("--check", action="store_true", help="valida a configuração e sai")
     p.add_argument("--custom-check", metavar="NOME", help="valida custom/NOME e sai")
+    p.add_argument("--instalar-skill", action="store_true",
+                   help="copia a skill hud-custom para o Claude Code e o Codex e sai")
     p.add_argument("--version", action="version", version=f"hud {__version__}")
     args = p.parse_args()
 
@@ -41,6 +43,8 @@ def main() -> int:
     cfg = config.load(args.config, args.pasta)
     if plat.is_admin():  # Windows: elevado não bloqueia, só avisa
         cfg.warnings.append("rodando como administrador: prefira uma sessão comum")
+    if args.instalar_skill:
+        return instalar_skill()
     if args.custom_check is not None:
         return custom_check(args.custom_check, cfg.custom_dir)
 
@@ -80,6 +84,22 @@ def main() -> int:
     return 0
 
 
+def instalar_skill() -> int:
+    from . import custom
+
+    try:
+        result = custom.install_skill()
+    except (custom.CustomError, OSError) as e:
+        print(f"hud: {e}", file=sys.stderr)
+        return 1
+    for destino, situacao, _ in result:
+        print(f"{destino}: {situacao}")
+    if not any(ok for *_, ok in result):
+        print("hud: nem o Claude Code nem o Codex estão instalados para este usuário.", file=sys.stderr)
+        return 1
+    return 0
+
+
 def custom_check(nome: str, root: Path | None = None) -> int:
     from . import custom
     from .layout import LayoutError
@@ -90,7 +110,7 @@ def custom_check(nome: str, root: Path | None = None) -> int:
     except (LayoutError, OSError) as e:
         print(f"erro: custom/{nome}: {e}", file=sys.stderr)
         return 1
-    print(f"OK: {lay.nome} ({root / nome})")
+    print(f"OK: {lay.nome} ({custom.find(root, nome)})")
     if lay.descricao:
         print(f"  {lay.descricao}")
     cols = " | ".join(f"{c.largura:g}%" if c.largura is not None else "resto" for c in lay.colunas)

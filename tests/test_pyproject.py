@@ -33,7 +33,14 @@ class PyprojectTest(unittest.TestCase):
         self.assertNotIn("optional-dependencies", self.project)
 
     def test_so_o_pacote_hud(self):
-        self.assertEqual(self.setuptools["packages"], ["hud"])
+        # Além do código, só os dados embutidos: os modelos de custom/ e a skill.
+        self.assertEqual(self.setuptools["packages"], ["hud", "hud._modelos", "hud._skill"])
+        self.assertEqual(self.setuptools["package-dir"],
+                         {"hud._modelos": "custom", "hud._skill": "skills/hud-custom"})
+        for pkg, src in self.setuptools["package-dir"].items():
+            self.assertFalse(any((ROOT / src).rglob("*.py")), f"{src} não pode ter código")
+        self.assertTrue((ROOT / "custom" / "foco" / "layout.toml").is_file())
+        self.assertTrue((ROOT / "skills" / "hud-custom" / "SKILL.md").is_file())
 
     def test_entrada_isolada(self):
         # O comando `hud` é scripts/hud, que roda o Python do venv com -I e

@@ -49,34 +49,65 @@ def custom_root(repo_hint: Path | None = None) -> Path:
     return plat.default_data_dir() / "custom"
 
 
+# O binário e o pacote do pipx trazem uma cópia de custom/ e de skills/hud-custom
+# dentro do pacote hud (packaging/hud.spec e pyproject.toml). No repositório elas
+# não existem: lá custom/ já é a raiz e a skill é a de skills/.
+_PACOTE = Path(__file__).resolve().parent
+
+
+def templates_root() -> Path | None:
+    """Os modelos que vêm com o HUD, somente leitura (None rodando do repositório)."""
+    p = _PACOTE / "_modelos"
+    return p if p.is_dir() else None
+
+
 def _dir(root: Path, nome: str) -> Path:
     if not valid_name(nome):
         raise CustomError(f"nome inválido: {nome!r} (a-z, 0-9, _ e -, até 40)")
     return Path(root) / nome
 
 
-def list_customs(root: Path) -> list[tuple[str, str, str | None]]:
-    root = Path(root)
+def find(root: Path, nome: str) -> Path:
+    """A pasta da customização: a do usuário ou, se não houver, o modelo embutido."""
+    d = _dir(root, nome)
+    if d.exists() or d.is_symlink():
+        return d
+    t = templates_root()
+    if t is not None and (t / nome / "layout.toml").is_file():
+        return t / nome
+    return d
+
+
+def _scan(root: Path) -> list[str]:
     if not root.is_dir():
         return []
+    return [e.name for e in os.scandir(root) if not e.name.startswith(".")
+            and (e.is_dir() or e.is_symlink() or plat.is_link(e.path))]
+
+
+def list_customs(root: Path) -> list[tuple[str, str, str | None, bool]]:
+    """(nome, descrição, erro, embutido): as do usuário e os modelos que elas não cobrem."""
+    root = Path(root)
+    t = templates_root()
+    mine = set(_scan(root))
+    nomes = mine | ({n for n in _scan(t) if valid_name(n)} if t is not None else set())
     out = []
-    for entry in sorted(os.scandir(root), key=lambda e: e.name):
-        if entry.name.startswith(".") or not (entry.is_dir() or entry.is_symlink()
-                                              or plat.is_link(entry.path)):
-            continue
+    for nome in sorted(nomes):
+        embutido = nome not in mine
         try:
-            out.append((entry.name, load_custom(root, entry.name).descricao, None))
+            d = (t if embutido else root) / nome
+            out.append((nome, lay.load(d).descricao, None, embutido))
         except (LayoutError, OSError) as e:
-            out.append((entry.name, "", str(e)))
+            out.append((nome, "", str(e), embutido))
     return out
 
 
 def load_custom(root: Path, nome: str) -> Layout:
-    return lay.load(_dir(root, nome))
+    return lay.load(find(root, nome))
 
 
 def digest(root: Path, nome: str) -> str:
-    return hashlib.sha256(lay.read_small(_dir(root, nome) / "layout.toml")).hexdigest()
+    return hashlib.sha256(lay.read_small(find(root, nome) / "layout.toml")).hexdigest()
 
 
 def _write_private(path: Path, text: str) -> None:
@@ -497,18 +528,61 @@ class PanelFeed:
 
 
 def skill_dir() -> Path | None:
-    """A skill hud-custom do repositório (a mesma ligada em ~/.claude e ~/.codex)."""
-    p = Path(__file__).resolve().parent.parent / "skills" / "hud-custom"
-    return p if (p / "SKILL.md").is_file() else None
+    """A skill hud-custom: a do repositório ou a cópia embutida no binário/pipx."""
+    for p in (_PACOTE.parent / "skills" / "hud-custom", _PACOTE / "_skill"):
+        if (p / "SKILL.md").is_file():
+            return p
+    return None
+
+
+def skill_targets(env=None) -> list[Path]:
+    """Onde o Claude Code e o Codex procuram skills do usuário."""
+    env = os.environ if env is None else env
+    home = Path.home()
+    claude = Path(env.get("CLAUDE_CONFIG_DIR") or home / ".claude")
+    codex = Path(env.get("CODEX_HOME") or home / ".codex")
+    return [claude / "skills" / "hud-custom", codex / "skills" / "hud-custom"]
+
+
+def install_skill(targets: list[Path] | None = None) -> list[tuple[Path, str, bool]]:
+    """Copia a skill para o Claude e o Codex (hud --instalar-skill): (destino, situação, ok).
+
+    Só instala onde a pasta do agente já existe (~/.claude, ~/.codex). Um destino
+    que é link (a instalação pelo repositório, ln -s) é mantido como está.
+    """
+    src = skill_dir()
+    if src is None:
+        raise CustomError("a skill hud-custom não veio com este HUD")
+    files = sorted(p for p in src.iterdir()
+                   if p.is_file() and not p.is_symlink() and not p.name.startswith("."))
+    out = []
+    for t in skill_targets() if targets is None else targets:
+        agent_home = t.parent.parent
+        if not agent_home.is_dir():
+            out.append((t, f"{agent_home} não existe: pulado", False))
+        elif plat.is_link(t):
+            out.append((t, "já é um link (instalação pelo repositório): mantido", True))
+        elif t.exists() and not t.is_dir():
+            out.append((t, "existe e não é pasta: pulado", False))
+        else:
+            t.mkdir(parents=True, exist_ok=True)
+            for f in files:
+                if plat.is_link(t / f.name):
+                    raise CustomError(f"{t / f.name} é link simbólico")
+                _write_shared(t / f.name, f.read_bytes())
+            out.append((t, "instalada", True))
+    return out
 
 
 def agent_context(root: Path) -> str:
     """O que o Claude e o Codex precisam saber para propor customizações de dentro do HUD."""
     skill = skill_dir()
     where = f" ({skill / 'SKILL.md'})" if skill else ""
+    t = templates_root()
+    modelos = f" (os modelos que vêm com o HUD, só para ler, ficam em {t})" if t else ""
     return (
         f"Você está dentro do HUD de terminal. Para mudar o layout do HUD, siga a skill "
-        f"hud-custom{where}; as customizações ficam em {root}. Dentro do HUD não grave "
+        f"hud-custom{where}; as customizações ficam em {root}{modelos}. Dentro do HUD não grave "
         "arquivos: responda com um bloco ```hud-custom nome=<nome> arquivo=<arquivo> por "
         "arquivo e diga ao usuário para digitar /custom salvar e depois /custom <nome>."
     )
