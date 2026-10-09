@@ -21,9 +21,9 @@ def main() -> int:
         return 2
     os.umask(0o077)
     locale.setlocale(locale.LC_ALL, "")
-    if args.custom_check is not None:
-        return custom_check(args.custom_check)
     cfg = config.load(args.config, args.pasta)
+    if args.custom_check is not None:
+        return custom_check(args.custom_check, cfg.custom_dir)
 
     if args.check:
         print(f"configuração: {cfg.source}\npasta: {cfg.vault} ({cfg.folder_source})\ndados: {cfg.data_dir}")
@@ -56,11 +56,11 @@ def main() -> int:
     return 0
 
 
-def custom_check(nome: str) -> int:
+def custom_check(nome: str, root: Path | None = None) -> int:
     from . import custom
     from .layout import LayoutError
 
-    root = custom.custom_root()
+    root = root or custom.custom_root()
     try:
         lay = custom.load_custom(root, nome)
     except (LayoutError, OSError) as e:
