@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Lançador. Python em modo isolado (-I): ignora PYTHONPATH, o site do usuário e
+# o diretório atual, então nenhum módulo plantado ao lado é carregado.
+set -euo pipefail
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+exec python3 -I -c 'import sys; sys.path.insert(0, sys.argv.pop(1)); from hud.__main__ import main; sys.exit(main())' "$here" "$@"

@@ -1,0 +1,93 @@
+# Copie para ~/.config/hud/config.toml e rode: chmod 600 ~/.config/hud/config.toml
+# O HUD recusa este arquivo se outro usuário puder escrevê-lo.
+
+vault = "~/Vault"                 # lido, nunca escrito; /pasta troca na sessão (e lembra), --pasta só na execução
+data_dir = "~/.local/share/hud"   # agenda.md e notas.md (permissão 600)
+refresh_seconds = 1               # indicadores do sistema (0.5–10)
+vault_scan_seconds = 5            # releitura do Vault (2–300)
+
+# Até 10 comandos, na ordem das teclas F1–F10 / Alt+1…Alt+0.
+# argv é uma lista: nada passa por shell. O executável é procurado só em
+# /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin (ou use caminho absoluto).
+# Proibidos: sudo, su, doas, pkexec, run0, shells (sh, bash, zsh…), env, xargs, nohup, setsid, script.
+# Campos opcionais: timeout (s, padrão 20), max_lines (padrão 200), confirm (pede "s"), cwd.
+# Definir qualquer [[command]] substitui a lista padrão inteira.
+
+[[command]]
+name = "Uptime e usuários"
+argv = ["w", "-s"]
+
+[[command]]
+name = "Discos"
+argv = ["df", "-h", "-x", "tmpfs", "-x", "devtmpfs", "-x", "squashfs", "-x", "overlay", "-x", "efivarfs"]
+
+[[command]]
+name = "Memória"
+argv = ["free", "-h"]
+
+[[command]]
+name = "Portas escutando"
+argv = ["ss", "-tulnH"]
+
+[[command]]
+name = "Serviços com falha"
+argv = ["systemctl", "--failed", "--no-pager", "--plain"]
+
+[[command]]
+name = "Processos por CPU"
+argv = ["ps", "-eo", "pid,user,%cpu,%mem,comm", "--sort=-%cpu"]
+max_lines = 15
+
+[[command]]
+name = "Erros do boot"
+argv = ["journalctl", "-p", "err", "-b", "-n", "25", "--no-pager", "-q"]
+timeout = 15
+
+[[command]]
+name = "Docker: containers"
+argv = ["docker", "ps", "--format", "table {{.Names}}\t{{.Status}}"]
+
+[[command]]
+name = "Git do projeto"
+argv = ["git", "status", "-sb"]
+cwd = "~/dev/hud"
+
+[[command]]
+name = "Limpar cache do apt"   # exemplo de comando que pede confirmação
+argv = ["apt-get", "clean", "--dry-run"]
+confirm = true
+
+# Claude Code na entrada (/c pergunta, ou Tab para o modo Claude).
+# Roda `claude -p` sem MCP e com permission-mode dontAsk: só as ferramentas
+# listadas existem. Bash, Edit, Write, WebFetch e WebSearch deixam o Claude
+# alterar arquivos, rodar comandos ou mandar dados para fora — uma nota com
+# instruções escondidas passaria a ter esse poder. O HUD avisa se você ligar.
+[claude]
+enabled = true
+executable = "claude"            # procurado no PATH fixo e em ~/.local/bin
+# Read/Grep/Glob só valem dentro destas pastas (padrão: a pasta do HUD, que
+# acompanha o /pasta; definir read_dirs ou cwd fixa e o Claude deixa de seguir). Sem isso,
+# liberar Read libera o disco inteiro. ~/.ssh, credenciais, .env, *.pem e afins
+# são negados sempre, mesmo que você ponha "~" aqui.
+# read_dirs = ["~/Vault"]
+# cwd = "~/Vault"                # padrão: a primeira pasta de read_dirs
+tools = ["Read", "Grep", "Glob"]
+# model = "claude-sonnet-5-5"    # padrão: o modelo do seu Claude Code
+max_budget_usd = 1.0             # teto por pergunta, nos dois perfis
+timeout = 600
+# Perfil ao abrir: "leitura" (acima) ou "completo" = o seu Claude Code inteiro
+# (ferramentas, MCP, skills, comandos /). Também dá para trocar na sessão com
+# /perfil. Segredos negados e o teto valem nos dois.
+profile = "leitura"
+full_permission_mode = "auto"    # default, acceptEdits, auto, dontAsk ou plan
+
+# Codex CLI local (/x pergunta, ou Tab até o modo Codex, em cinza).
+# "leitura" = sandbox read-only: não escreve nem usa a rede, mas lê o disco todo.
+# "completo" = sandbox e aprovações do seu ~/.codex/config.toml.
+[codex]
+enabled = true
+executable = "codex"
+# cwd = "~/Vault"                # padrão: a pasta do HUD (acompanha o /pasta)
+profile = "leitura"
+# model = "gpt-6.1-sol"          # padrão: o do seu ~/.codex/config.toml
+timeout = 600
