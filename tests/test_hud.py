@@ -235,6 +235,22 @@ class UsageTest(unittest.TestCase):
             self.assertEqual(t.current.five_hour.left, 50)
 
 
+_FAKE_AGENTS = None
+
+
+def fake_agent(name: str) -> str:
+    """Executável falso para os testes não dependerem de claude/codex instalados (o CI não tem)."""
+    global _FAKE_AGENTS
+    if _FAKE_AGENTS is None:
+        _FAKE_AGENTS = tempfile.mkdtemp(prefix="hud-agentes-")
+        os.chmod(_FAKE_AGENTS, 0o700)
+    exe = Path(_FAKE_AGENTS) / name
+    if not exe.exists():
+        exe.write_text("#!/bin/sh\nexit 0\n")
+        os.chmod(exe, 0o700)
+    return str(exe)
+
+
 class ClaudeTest(unittest.TestCase):
     def test_argv_is_read_only_without_mcp_and_prompt_not_in_argv(self):
         argv = build_argv(ClaudeConfig(executable="/x/claude", cwd="/"), "abc")
@@ -275,14 +291,14 @@ class ClaudeTest(unittest.TestCase):
 
     def test_config_profiles(self):
         with self.assertRaises(config.ConfigError):
-            config.build_claude({"full_permission_mode": "bypassPermissions"})
+            config.build_claude({"executable": fake_agent("claude"), "full_permission_mode": "bypassPermissions"})
         with self.assertRaises(config.ConfigError):
-            config.build_claude({"profile": "tudo"})
-        self.assertEqual(config.build_claude({"profile": "completo"}).profile, "completo")
+            config.build_claude({"executable": fake_agent("claude"), "profile": "tudo"})
+        self.assertEqual(config.build_claude({"executable": fake_agent("claude"), "profile": "completo"}).profile, "completo")
 
     def test_config_rejects_bad_tools(self):
         with self.assertRaises(config.ConfigError):
-            config.build_claude({"tools": ["Read; rm -rf ~"]})
+            config.build_claude({"executable": fake_agent("claude"), "tools": ["Read; rm -rf ~"]})
 
 
 class CodexTest(unittest.TestCase):
@@ -321,7 +337,9 @@ class FolderTest(unittest.TestCase):
     def test_remembered_folder_precedence_and_agents_follow(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as pasta:
             cfgp = Path(d) / "c.toml"
-            cfgp.write_text(f'data_dir = "{d}/dados"\nvault = "{d}"\n')
+            cfgp.write_text(f'data_dir = "{d}/dados"\nvault = "{d}"\n'
+                            f'[claude]\nexecutable = "{fake_agent("claude")}"\n'
+                            f'[codex]\nexecutable = "{fake_agent("codex")}"\n')
             os.chmod(cfgp, 0o600)
             self.assertEqual(config.load(cfgp).vault, Path(d))
             config.remember_folder(Path(d) / "dados", Path(pasta))
