@@ -11,9 +11,11 @@ Dois perfis:
 Nos dois, a lista de segredos é negada e há teto de gasto por pergunta.
 """
 
+import ntpath
 import os
 from dataclasses import dataclass
 
+from . import plataforma as plat
 from .agent import Agent, describe_tool
 from .text import clean, clean_line
 
@@ -31,6 +33,13 @@ SECRETS = ("~/.ssh/**", "~/.gnupg/**", "~/.claude/.credentials.json", "~/.claude
            "~/.password-store/**", "~/.local/share/keyrings/**", "~/.mozilla/**",
            "~/.config/google-chrome/**", "**/.env", "**/.env.*", "**/*.pem", "**/*.key",
            "**/id_rsa*", "**/id_ed25519*")
+# No Windows, também o cofre de credenciais e as chaves DPAPI do perfil.
+WINDOWS_SECRETS = ("~/AppData/Roaming/Microsoft/Credentials/**",
+                   "~/AppData/Local/Microsoft/Credentials/**",
+                   "~/AppData/Roaming/Microsoft/Protect/**",
+                   "~/AppData/Roaming/GitHub CLI/**",
+                   "~/AppData/Local/Google/Chrome/User Data/**",
+                   "~/AppData/Roaming/Mozilla/**")
 PERMISSION_MODES = ("default", "acceptEdits", "auto", "dontAsk", "plan")
 
 
@@ -46,11 +55,29 @@ class ClaudeConfig:
     profile: str = "leitura"
     full_permission_mode: str = "auto"
     follow_folder: bool = True  # cwd/leitura acompanham a pasta do HUD
+    launch: tuple[str, ...] = ()  # Windows, shim .cmd do npm: (node.exe, script.js)
+
+
+def win_rule_path(d: str, home: str) -> str:
+    """Windows: o Claude Code compara caminhos em forma POSIX (C:\\x vira /c/x),
+    então ~/x dentro da home e //c/x fora dela. `d` e `home` já resolvidos."""
+    nd, nh = ntpath.normcase(ntpath.normpath(d)), ntpath.normcase(ntpath.normpath(home))
+    d = ntpath.normpath(d)
+    if nd == nh:
+        return "~"
+    if nd.startswith(nh.rstrip("\\") + "\\"):
+        return "~/" + d[len(nh.rstrip("\\")) + 1:].replace("\\", "/")
+    drive, rest = ntpath.splitdrive(d)
+    if len(drive) == 2 and drive[1] == ":":
+        return "//" + drive[0].lower() + rest.replace("\\", "/")
+    return "/" + d.replace("\\", "/")  # UNC: //servidor/pasta
 
 
 def rule_path(d: str) -> str:
     """Caminho no formato das regras de permissão: ~/x ou //absoluto."""
     home = os.path.expanduser("~")
+    if plat.WINDOWS:
+        return win_rule_path(os.path.realpath(os.path.expanduser(d)), os.path.realpath(home))
     d = os.path.realpath(os.path.expanduser(d))
     if d == home:
         return "~"
@@ -72,8 +99,9 @@ def allow_rules(cfg: ClaudeConfig) -> list[str]:
 def build_argv(cfg: ClaudeConfig, session_id: str = "", profile: str | None = None,
                context: str = "") -> list[str]:
     profile = profile or cfg.profile
-    deny = [f"{t}({p})" for t in SCOPED_TOOLS for p in SECRETS]
-    argv = [cfg.executable, "-p", "--output-format", "stream-json", "--verbose"]
+    secrets = SECRETS + (WINDOWS_SECRETS if plat.WINDOWS else ())
+    deny = [f"{t}({p})" for t in SCOPED_TOOLS for p in secrets]
+    argv = [*(cfg.launch or (cfg.executable,)), "-p", "--output-format", "stream-json", "--verbose"]
     if profile == "completo":
         argv += ["--permission-mode", cfg.full_permission_mode]
     else:

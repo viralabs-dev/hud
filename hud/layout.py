@@ -14,6 +14,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import plataforma as plat
 from .config import ConfigError, build_command
 from .text import clean_line
 
@@ -37,6 +38,10 @@ TIPOS = ("texto", "arquivo", "comando")
 
 DENIED_DIRS = ("~/.ssh", "~/.gnupg", "~/.aws", "~/.config/gh", "~/.kube",
                "~/.password-store", "~/.local/share/keyrings")
+if plat.WINDOWS:  # cofre de credenciais, chaves DPAPI, gh e navegadores
+    DENIED_DIRS += ("~/AppData/Roaming/Microsoft/Credentials", "~/AppData/Local/Microsoft/Credentials",
+                    "~/AppData/Roaming/Microsoft/Protect", "~/AppData/Roaming/GitHub CLI",
+                    "~/AppData/Local/Google/Chrome/User Data", "~/AppData/Roaming/Mozilla")
 DENIED_FILES = ("~/.claude/.credentials.json", "~/.claude.json", "~/.codex/auth.json",
                 "~/.netrc", "~/.pgpass")
 DENIED_NAMES = (".env*", "*.pem", "*.key", "id_rsa*", "id_ed25519*")
@@ -102,7 +107,9 @@ def _int(v) -> bool:
 
 
 def _within(p: str, root: str) -> bool:
-    return p == root or p.startswith(root.rstrip("/") + "/")
+    # normcase: no Windows, ~/.SSH é a mesma pasta que ~/.ssh (no POSIX não muda nada).
+    p, root = os.path.normcase(p), os.path.normcase(root)
+    return p == root or p.startswith(root.rstrip(os.sep) + os.sep)
 
 
 def denied_path(raw: str) -> str | None:
@@ -297,7 +304,7 @@ def parse_text(text: str | bytes, nome: str, base_dir: Path | None = None) -> La
 def read_small(path: Path, limit: int = MAX_FILE) -> bytes:
     """Lê um arquivo regular de até `limit` bytes sem seguir link simbólico."""
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        fd = plat.open_nofollow(path, os.O_RDONLY | plat.O_NONBLOCK | plat.O_CLOEXEC)
     except OSError as e:
         if e.errno == errno.ELOOP:
             raise LayoutError(f"{path.name} é link simbólico") from None
@@ -316,13 +323,13 @@ def read_small(path: Path, limit: int = MAX_FILE) -> bytes:
 
 def load(dir: Path) -> Layout:
     dir = Path(dir)
-    if dir.is_symlink():
+    if plat.is_link(dir):
         raise LayoutError(f"{dir.name} é link simbólico")
     if not dir.is_dir():
         raise LayoutError(f"{dir} não é uma pasta")
     lay = parse_text(read_small(dir / "layout.toml"), dir.name, dir)
     for entry in sorted(os.scandir(dir), key=lambda e: e.name):
-        if entry.is_symlink():
+        if entry.is_symlink() or plat.is_link(entry.path):
             raise LayoutError(f"{entry.name} é link simbólico")
         if entry.is_dir():
             raise LayoutError(f"{entry.name}: subpastas não são permitidas")

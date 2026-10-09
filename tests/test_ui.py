@@ -6,6 +6,12 @@ scripts falsos que imprimem JSONL no formato real e gravam o argv recebido.
 Nada usa o Vault, ~/.local/share/hud, ~/.config/hud nem a rede.
 """
 
+import sys
+import unittest
+
+if sys.platform == "win32":  # pty, fcntl e termios não existem no Windows
+    raise unittest.SkipTest("teste de tela em pty: só POSIX")
+
 import fcntl
 import json
 import os
@@ -18,7 +24,6 @@ import struct
 import tempfile
 import termios
 import time
-import unittest
 from pathlib import Path
 
 from tests.vt import Screen

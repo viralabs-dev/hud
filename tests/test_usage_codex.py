@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from hud import usage as us
+from tests.suporte import posix_only, symlink
 
 REAL = {"limit_id": "codex", "limit_name": None,
         "primary": {"used_percent": 1.0, "window_minutes": 10080, "resets_at": 1791979352},
@@ -138,6 +139,7 @@ class TrackerTest(unittest.TestCase):
             write_rollout(self.root / f"2026/01/{d}/rollout-{d}.jsonl", line, mtime=100)
         self.assertEqual(us.latest_rollout(self.root).name, "rollout-03.jsonl")
 
+    @posix_only
     def test_rejects_world_writable(self):
         p = write_rollout(self.root / "2026/10/08/rollout-a.jsonl", [token_count(REAL)])
         os.chmod(p, 0o666)
@@ -152,16 +154,17 @@ class TrackerTest(unittest.TestCase):
         real = write_rollout(self.root / "fora.jsonl", [token_count(REAL)])
         d = self.root / "2026/10/08"
         d.mkdir(parents=True)
-        (d / "rollout-link.jsonl").symlink_to(real)
+        symlink(self, real, d / "rollout-link.jsonl")
         self.assertIsNone(us.read_codex_rollout(d / "rollout-link.jsonl"))
         self.assertFalse(us.CodexUsageTracker(self.root).poll())
 
-    @unittest.skipUnless(os.getuid() == 0, "chown precisa de root")
+    @unittest.skipUnless(hasattr(os, "getuid") and os.getuid() == 0, "chown precisa de root")
     def test_rejects_foreign_owner(self):
         p = write_rollout(self.root / "2026/10/08/rollout-a.jsonl", [token_count(REAL)])
         os.chown(p, 65534, 65534)
         self.assertIsNone(us.read_codex_rollout(p))
 
+    @posix_only
     def test_foreign_owner_by_uid(self):
         p = write_rollout(self.root / "2026/10/08/rollout-a.jsonl", [token_count(REAL)])
         real_getuid = os.getuid

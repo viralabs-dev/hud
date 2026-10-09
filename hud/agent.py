@@ -2,18 +2,19 @@
 
 Cada pergunta é um processo novo em modo headless que retoma a mesma sessão.
 O prompt vai pela entrada padrão, nunca como argumento, então não pode ser
-lido como opção. O processo roda em sessão própria, com tempo-limite que mata
-o grupo inteiro, e o stdout é lido como JSONL.
+lido como opção. O processo roda em sessão própria (no Windows, grupo de
+processos próprio), com tempo-limite que mata a árvore inteira, e o stdout é
+lido como JSONL.
 """
 
 import json
 import os
-import signal
 import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
 
+from . import plataforma as plat
 from .text import clean, clean_line
 
 MAX_PROMPT = 20_000
@@ -33,7 +34,8 @@ class Session:
 
 def agent_env(prefixes: tuple[str, ...]) -> dict[str, str]:
     """O seu PATH (hooks como o rtk precisam dele) e as variáveis do agente;
-    nada de LD_PRELOAD, PYTHONPATH e afins."""
+    nada de LD_PRELOAD, PYTHONPATH e afins. No Windows entram também SystemRoot,
+    TEMP, USERPROFILE, APPDATA, PATHEXT, COMSPEC e afins (o node precisa deles)."""
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": os.path.expanduser("~"),
@@ -42,6 +44,9 @@ def agent_env(prefixes: tuple[str, ...]) -> dict[str, str]:
         "TERM": "dumb",
         "NO_COLOR": "1",
     }
+    if plat.WINDOWS:
+        env.update(plat.windows_base_env())
+        env["PATH"] = os.environ.get("PATH", plat.safe_path())
     common = ("XDG_", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy")
     for k, v in os.environ.items():
         if k.startswith(prefixes + common):
@@ -105,10 +110,7 @@ class Agent:
             p = self.proc
             self.stopped = p is not None
         if p:
-            try:
-                os.killpg(p.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+            plat.kill_tree(p, force=False)
         return p is not None
 
     def ask(self, prompt: str) -> bool:
@@ -118,7 +120,7 @@ class Agent:
             proc = subprocess.Popen(
                 self.argv(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, env=agent_env(self.env_prefixes), cwd=self.cfg.cwd,
-                start_new_session=True, close_fds=True, shell=False,
+                close_fds=True, shell=False, **plat.popen_group_kwargs(),
             )
         except OSError as e:
             self.emit("agent_end", False, f"não consegui iniciar: {e.strerror}", None, "")
@@ -134,10 +136,7 @@ class Agent:
         drain.start()
 
         def kill() -> None:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            plat.kill_tree(proc)
 
         timer = threading.Timer(self.cfg.timeout, kill)
         timer.start()

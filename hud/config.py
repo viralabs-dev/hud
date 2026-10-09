@@ -3,12 +3,10 @@
 O painel de comandos só executa o que está nesta lista: argv fixo, executável
 resolvido para caminho absoluto num PATH fixo, sem shell. O arquivo de
 configuração define o que roda na máquina, então ele é recusado se outro
-usuário puder escrevê-lo.
+usuário puder escrevê-lo (no Windows: se estiver fora do seu perfil).
 """
 
-import grp
 import os
-import pwd
 import re
 import shutil
 import stat
@@ -16,11 +14,20 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import plataforma as plat
 from .agent import PROFILES
 from .claude import PERMISSION_MODES, ClaudeConfig
 from .codex import CodexConfig
 
-SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+if plat.WINDOWS:  # grp e pwd não existem no Windows
+    grp = pwd = None
+else:
+    import grp
+    import pwd
+
+# Linux e macOS: o PATH de sempre. Windows: System32, o Windows, Wbem e o
+# PowerShell do sistema (o powershell em si é proibido; ele só está no PATH).
+SAFE_PATH = plat.safe_path()
 
 # Nada de elevar privilégio nem abrir um interpretador de shell: com eles a
 # lista deixaria de ser uma lista.
@@ -31,9 +38,9 @@ FORBIDDEN = {
 KEYS = "1234567890"
 MAX_COMMANDS = len(KEYS)
 
-DEFAULT_CONFIG_PATH = Path("~/.config/hud/config.toml").expanduser()
+DEFAULT_CONFIG_PATH = plat.default_config_path()
 
-DEFAULT_COMMANDS = [
+LINUX_COMMANDS = [
     {"name": "Uptime e usuários", "argv": ["w", "-s"]},
     {"name": "Discos", "argv": ["df", "-h", "-x", "tmpfs", "-x", "devtmpfs",
                                 "-x", "squashfs", "-x", "overlay", "-x", "efivarfs"]},
@@ -47,6 +54,32 @@ DEFAULT_COMMANDS = [
                                        "--no-pager", "-q"], "timeout": 15},
     {"name": "Atualizações (apt)", "argv": ["apt", "list", "--upgradable"], "timeout": 30},
 ]
+
+MACOS_COMMANDS = [
+    {"name": "Uptime e carga", "argv": ["uptime"]},
+    {"name": "Discos", "argv": ["df", "-h"]},
+    {"name": "Memória", "argv": ["vm_stat"]},
+    {"name": "Interfaces de rede", "argv": ["ifconfig"], "max_lines": 120},
+    {"name": "Conexões e portas", "argv": ["netstat", "-an"], "max_lines": 120},
+    {"name": "Processos por CPU", "argv": ["ps", "-Ao", "pid,user,%cpu,%mem,comm", "-r"],
+     "max_lines": 15},
+    {"name": "Bateria", "argv": ["pmset", "-g", "batt"]},
+]
+
+# argv fixo, sem shell. O wmic está obsoleto; tasklist não ordena por CPU.
+WINDOWS_COMMANDS = [
+    {"name": "Sistema", "argv": ["systeminfo"], "max_lines": 60, "timeout": 30},
+    {"name": "Processos", "argv": ["tasklist", "/FO", "TABLE"], "max_lines": 60},
+    {"name": "Conexões e portas", "argv": ["netstat", "-ano"], "max_lines": 120, "timeout": 30},
+    {"name": "Endereços de rede", "argv": ["ipconfig", "/all"], "max_lines": 120},
+    {"name": "Disco C:", "argv": ["fsutil", "volume", "diskfree", "C:"]},
+    {"name": "Serviços", "argv": ["sc", "query", "state=", "all"], "max_lines": 120},
+    {"name": "Usuário", "argv": ["whoami"]},
+    {"name": "Nome da máquina", "argv": ["hostname"]},
+]
+
+PLATFORM_COMMANDS = {"linux": LINUX_COMMANDS, "macos": MACOS_COMMANDS, "windows": WINDOWS_COMMANDS}
+DEFAULT_COMMANDS = PLATFORM_COMMANDS[plat.system()]
 
 
 class ConfigError(Exception):
@@ -96,7 +129,25 @@ def _writable_by_others(st: os.stat_result) -> bool:
         st.st_uid == os.getuid() and _private_group(st.st_gid))
 
 
+def _untrusted(p: str) -> bool:
+    """Executável ou pasta que outro usuário pode alterar.
+
+    POSIX: dono e modo. Windows: o caminho resolvido precisa ficar no seu
+    perfil, no Windows ou em Program Files (a ACL não é lida)."""
+    if plat.WINDOWS:
+        return plat.exe_location_error(p) is not None
+    return _writable_by_others(os.stat(p))
+
+
 def check_private_file(path: Path) -> None:
+    if plat.WINDOWS:
+        st = os.lstat(path)
+        if stat.S_ISLNK(st.st_mode) or plat.is_reparse(st):
+            raise ConfigError(f"{path} é link simbólico ou junção")
+        why = plat.private_location_error(path)
+        if why:
+            raise ConfigError(why)
+        return
     st = path.stat()
     if st.st_uid != os.getuid():
         raise ConfigError(f"{path} não pertence a você")
@@ -105,16 +156,22 @@ def check_private_file(path: Path) -> None:
 
 
 def resolve_executable(name: str) -> str:
-    if os.path.basename(name) in FORBIDDEN:
+    if plat.is_forbidden(name, FORBIDDEN):
         raise ConfigError(f"'{name}' não é permitido no painel")
-    exe = name if os.path.isabs(name) else shutil.which(name, path=SAFE_PATH)
+    if plat.WINDOWS:
+        # Só .exe (e só se o PATHEXT aceitar): .cmd/.bat passariam pelo cmd.exe.
+        exe = plat.find_windows(name, SAFE_PATH.split(";"), plat.allowed_exts(plat.COMMAND_EXTS))
+    else:
+        exe = name if os.path.isabs(name) else shutil.which(name, path=SAFE_PATH)
     if not exe or not os.path.isfile(exe) or not os.access(exe, os.X_OK):
         raise ConfigError(f"'{name}' não encontrado ou não executável")
     exe = os.path.realpath(exe)
-    if os.path.basename(exe) in FORBIDDEN:
+    if plat.is_forbidden(exe, FORBIDDEN):
         raise ConfigError(f"'{name}' aponta para '{exe}', que não é permitido")
+    if plat.WINDOWS and os.path.splitext(exe)[1].lower() not in plat.COMMAND_EXTS:
+        raise ConfigError(f"'{name}' aponta para '{exe}': no Windows só .exe roda no painel")
     for p in (exe, os.path.dirname(exe)):
-        if _writable_by_others(os.stat(p)):
+        if _untrusted(p):
             raise ConfigError(f"'{p}' pode ser alterado por outros usuários")
     return exe
 
@@ -147,7 +204,7 @@ def build_command(i: int, raw: dict) -> Command:
     )
 
 
-FORBIDDEN_ROOTS = ("/", "/proc", "/sys", "/dev", "/run", "/boot", "/etc")
+FORBIDDEN_ROOTS = plat.LINUX_FORBIDDEN_ROOTS  # macOS e Windows: plat.system_folder
 FOLDER_FILE = "pasta"
 
 
@@ -158,7 +215,7 @@ def validate_folder(raw: str | Path) -> Path:
         raise ConfigError("informe uma pasta")
     if not p.is_dir():
         raise ConfigError(f"'{p}' não é uma pasta")
-    if str(p) in FORBIDDEN_ROOTS or any(str(p).startswith(r + "/") for r in FORBIDDEN_ROOTS[1:]):
+    if plat.system_folder(str(p)):
         raise ConfigError(f"'{p}' é pasta do sistema; escolha uma pasta sua")
     if not os.access(p, os.R_OK | os.X_OK):
         raise ConfigError(f"sem permissão para ler '{p}'")
@@ -181,7 +238,7 @@ def remember_folder(data_dir: Path, folder: Path | None) -> None:
         return
     data_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = data_dir / f".{FOLDER_FILE}.tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    fd = plat.open_nofollow(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(str(folder) + "\n")
     os.replace(tmp, f)
@@ -204,7 +261,7 @@ def load(path: Path | None = None, folder: str | None = None) -> Config:
 
     cfg = Config(
         vault=Path(os.path.expanduser(data.get("vault", "~/Vault"))),
-        data_dir=Path(os.path.expanduser(data.get("data_dir", "~/.local/share/hud"))),
+        data_dir=Path(os.path.expanduser(data.get("data_dir", plat.default_data_dir_text()))),
         refresh=min(max(float(data.get("refresh_seconds", 1.0)), 0.5), 10.0),
         vault_scan=min(max(float(data.get("vault_scan_seconds", 5.0)), 2.0), 300.0),
         warnings=warnings,
@@ -261,21 +318,104 @@ TOOL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\([^\x00-\x1f]*\))?$")
 RISKY_TOOLS = {"Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Agent", "Task"}
 
 
+def agent_dirs() -> list[str]:
+    """Windows: onde procurar claude e codex — o PATH fixo, o npm global
+    (%APPDATA%\\npm) e ~\\.local\\bin (instalador nativo do Claude Code)."""
+    dirs = SAFE_PATH.split(";")
+    appdata = os.environ.get("APPDATA", "")
+    if appdata:
+        dirs.append(os.path.join(appdata, "npm"))
+    dirs.append(os.path.join(os.path.expanduser("~"), ".local", "bin"))
+    return dirs
+
+
 def resolve_agent(name) -> str:
-    """Executável de um agente: PATH fixo e ~/.local/bin, nada gravável por outros."""
+    """Executável de um agente: PATH fixo e ~/.local/bin, nada gravável por outros.
+
+    No Windows: também %APPDATA%\\npm; aceita .exe e o shim .cmd do npm, que
+    `agent_launch` troca por node.exe + script (nunca cmd.exe)."""
     if not isinstance(name, str) or not name:
         raise ConfigError("'executable' inválido")
-    if os.path.isabs(os.path.expanduser(name)):
+    if plat.WINDOWS:
+        if plat.is_forbidden(name, FORBIDDEN):
+            raise ConfigError(f"'{name}' não é permitido como agente")
+        exe = plat.find_windows(os.path.expanduser(name), agent_dirs(),
+                                plat.allowed_exts(plat.AGENT_EXTS))
+    elif os.path.isabs(os.path.expanduser(name)):
         exe = os.path.expanduser(name)
     else:
         exe = shutil.which(name, path=SAFE_PATH + ":" + os.path.expanduser("~/.local/bin"))
     if not exe or not os.access(exe, os.X_OK):
         raise ConfigError(f"'{name}' não encontrado")
     real = os.path.realpath(exe)
+    if plat.WINDOWS and (plat.is_forbidden(real, FORBIDDEN)
+                         or os.path.splitext(real)[1].lower() not in plat.AGENT_EXTS):
+        raise ConfigError(f"'{name}' aponta para '{real}', que não é permitido como agente")
     for p in (real, os.path.dirname(real), os.path.dirname(exe)):
-        if _writable_by_others(os.stat(p)):
+        if _untrusted(p):
             raise ConfigError(f"'{p}' pode ser alterado por outros usuários")
     return exe
+
+
+# O shim .cmd que o npm gera para um pacote global termina com uma linha como
+#   "%_prog%"  "%dp0%\node_modules\@anthropic-ai\claude-code\cli.js" %*
+# (versões antigas usam %~dp0). Só esse formato é aceito.
+NPM_SHIM_SCRIPT = re.compile(r'"%(?:dp0%|~dp0)\\?([^"%<>|&^\r\n]+?\.(?:js|cjs|mjs))"', re.I)
+MAX_SHIM = 16 * 1024
+
+
+def parse_npm_shim(text: str) -> str:
+    """Caminho relativo (à pasta do shim) do script JS que o shim do npm roda.
+
+    Exatamente um script, dentro de node_modules, sem `..`, `:` nem partes vazias."""
+    found = {m.group(1) for m in NPM_SHIM_SCRIPT.finditer(text)}
+    if len(found) != 1:
+        raise ConfigError("shim .cmd não reconhecido (esperava um shim do npm)")
+    rel = found.pop().replace("/", "\\")
+    parts = rel.split("\\")
+    if (":" in rel or ".." in parts or any(not p for p in parts)
+            or parts[0].lower() != "node_modules"):
+        raise ConfigError(f"shim .cmd aponta para '{rel}', fora do node_modules")
+    return rel
+
+
+def agent_launch(exe: str) -> tuple[str, ...]:
+    """argv inicial do agente quando o executável não roda direto; () quando roda.
+
+    Um `.cmd` no Windows exigiria `cmd.exe /c`: shell de volta, com expansão de
+    %VAR% e metacaracteres nos argumentos (o prompt de sistema e as regras vão
+    na linha de comando). Em vez disso, o HUD lê o shim do npm, acha o script
+    JS e roda o mesmo node.exe com ele — o que o shim faria, sem cmd.exe."""
+    if not plat.WINDOWS or os.path.splitext(exe)[1].lower() != ".cmd":
+        return ()
+    shim_dir = os.path.dirname(os.path.realpath(exe))
+    try:
+        fd = plat.open_nofollow(exe, os.O_RDONLY)
+        with os.fdopen(fd, "rb") as fh:
+            raw = fh.read(MAX_SHIM + 1)
+    except OSError as e:
+        raise ConfigError(f"não consegui ler o shim '{exe}': {e.strerror}") from None
+    if len(raw) > MAX_SHIM:
+        raise ConfigError(f"shim '{exe}' grande demais")
+    rel = parse_npm_shim(raw.decode("utf-8", "replace"))
+    script = os.path.normpath(os.path.join(shim_dir, rel))
+    real_script = os.path.realpath(script)
+    if os.path.normcase(real_script) != os.path.normcase(script):
+        raise ConfigError(f"'{script}' passa por link ou junção")
+    if not os.path.isfile(real_script) or _untrusted(real_script):
+        raise ConfigError(f"script do shim '{script}' não encontrado ou fora do seu perfil")
+    # O shim usa o node.exe ao lado dele, senão o do PATH: o mesmo aqui.
+    node = plat.find_windows("node", [shim_dir] + os.environ.get("PATH", "").split(";"),
+                             plat.allowed_exts((".exe",)))
+    if not node:
+        raise ConfigError("node.exe não encontrado (o shim .cmd do npm precisa dele)")
+    node = os.path.realpath(node)
+    if plat.command_name(node) != "node":
+        raise ConfigError(f"'{node}' não é o node.exe")
+    for p in (node, os.path.dirname(node)):
+        if _untrusted(p):
+            raise ConfigError(f"'{p}' pode ser alterado por outros usuários")
+    return (node, real_script)
 
 
 def _common(raw: dict, default_cwd: str) -> tuple[str, str, float, str]:
@@ -298,15 +438,17 @@ def build_codex(raw: dict, vault: Path | None = None) -> CodexConfig:
     if not isinstance(raw, dict):
         raise ConfigError("[codex] precisa ser uma tabela")
     exe = resolve_agent(raw.get("executable", "codex"))
+    launch = agent_launch(exe)
     cwd, model, timeout, profile = _common(raw, str(vault) if vault and vault.is_dir() else "~")
     return CodexConfig(executable=exe, cwd=cwd, model=model, timeout=timeout, profile=profile,
-                       follow_folder="cwd" not in raw)
+                       follow_folder="cwd" not in raw, launch=launch)
 
 
 def build_claude(raw: dict, vault: Path | None = None) -> ClaudeConfig:
     if not isinstance(raw, dict):
         raise ConfigError("[claude] precisa ser uma tabela")
     exe = resolve_agent(raw.get("executable", "claude"))
+    launch = agent_launch(exe)
     tools = raw.get("tools", ["Read", "Grep", "Glob"])
     if (not isinstance(tools, list) or not tools
             or not all(isinstance(t, str) and TOOL_NAME.match(t) for t in tools)):
@@ -318,7 +460,7 @@ def build_claude(raw: dict, vault: Path | None = None) -> ClaudeConfig:
     for d in read_dirs:
         if not os.path.isdir(d):
             raise ConfigError(f"read_dirs: '{d}' não existe")
-        if d == "/":
+        if d == "/" or (plat.WINDOWS and not os.path.splitdrive(d)[1].strip("\\/")):
             raise ConfigError("read_dirs não pode ser a raiz /")
     cwd, model, timeout, profile = _common(raw, read_dirs[0] if read_dirs else "~")
     budget = raw.get("max_budget_usd", 1.0)
@@ -331,4 +473,5 @@ def build_claude(raw: dict, vault: Path | None = None) -> ClaudeConfig:
     return ClaudeConfig(executable=exe, cwd=cwd, tools=tuple(tools), model=model,
                         max_budget_usd=float(budget), timeout=timeout,
                         read_dirs=tuple(read_dirs), profile=profile, full_permission_mode=mode,
-                        follow_folder="read_dirs" not in raw and "cwd" not in raw)
+                        follow_folder="read_dirs" not in raw and "cwd" not in raw,
+                        launch=launch)

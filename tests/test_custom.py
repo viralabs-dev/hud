@@ -9,6 +9,8 @@ from unittest import mock
 
 from hud import custom as cu
 from hud import layout as L
+from hud import plataforma as plat
+from tests.suporte import ECHO, ECHO_ARGV, SLEEP, WINDOWS, home_env, posix_only, symlink, windows_only
 
 BASE = {"coluna": [{"paineis": ["sistema", "saida"]}]}
 
@@ -17,6 +19,14 @@ def lay(**over):
     d = {"nome": "t", "coluna": [{"paineis": ["sistema", "saida"]}]}
     d.update(over)
     return d
+
+
+def _try_unlink(path: Path) -> bool:
+    try:
+        path.unlink()
+    except PermissionError:
+        return False
+    return True
 
 
 def wait_for(cond, timeout=5.0):
@@ -48,7 +58,7 @@ class ParseTest(unittest.TestCase):
             ],
             "painel": [
                 {"id": "lembretes", "titulo": "LEMBRETES", "tipo": "texto", "arquivo": "lembretes.md"},
-                {"id": "eco", "tipo": "comando", "argv": ["echo", "oi"], "intervalo": 5, "timeout": 2},
+                {"id": "eco", "tipo": "comando", "argv": [ECHO, "oi"], "intervalo": 5, "timeout": 2},
             ],
         }
         lay_ = self.ok(data, "foco")
@@ -127,8 +137,8 @@ class ParseTest(unittest.TestCase):
         self.bad(with_panel({"id": "x", "tipo": "comando"}), "argv")
         self.bad(with_panel({"id": "x", "tipo": "comando", "argv": ["sudo", "ls"]}), "não é permitido")
         self.bad(with_panel({"id": "x", "tipo": "comando", "argv": ["bash", "-c", "id"]}))
-        self.bad(with_panel({"id": "x", "tipo": "comando", "argv": ["echo"], "intervalo": 4}), "intervalo")
-        self.bad(with_panel({"id": "x", "tipo": "comando", "argv": ["echo"], "timeout": 61}), "timeout")
+        self.bad(with_panel({"id": "x", "tipo": "comando", "argv": [ECHO], "intervalo": 4}), "intervalo")
+        self.bad(with_panel({"id": "x", "tipo": "comando", "argv": [ECHO], "timeout": 61}), "timeout")
         self.bad({"coluna": [{"paineis": ["saida"]}],
                   "painel": [{"id": "x", "tipo": "texto", "arquivo": "a.md"}] * 2}, "duas vezes")
 
@@ -136,8 +146,8 @@ class ParseTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             os.makedirs(f"{home}/.ssh")
             os.makedirs(f"{home}/logs")
-            os.symlink(f"{home}/.ssh", f"{home}/logs/disfarce")
-            with mock.patch.dict(os.environ, {"HOME": home}):
+            symlink(self, f"{home}/.ssh", f"{home}/logs/disfarce")
+            with mock.patch.dict(os.environ, home_env(home)):
                 for cam in ("~/.ssh", "~/.ssh/config", f"{home}/.aws/credentials",
                             "~/.claude/.credentials.json", "~/.claude.json", "~/.codex/auth.json",
                             "~/.netrc", "~/.pgpass", "~/.local/share/keyrings/x",
@@ -163,7 +173,7 @@ class ParseTest(unittest.TestCase):
             c.mkdir()
             real = Path(d) / "real.toml"
             real.write_text('[[coluna]]\npaineis = ["saida"]\n')
-            os.symlink(real, c / "layout.toml")
+            symlink(self, real, c / "layout.toml")
             with self.assertRaises(L.LayoutError):
                 L.load(c)
             (c / "layout.toml").unlink()
@@ -235,6 +245,17 @@ class ComputeTest(unittest.TestCase):
 
 
 class TrustTest(unittest.TestCase):
+    @windows_only
+    def test_trust_windows_outside_profile(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as outro:
+            t = cu.Trust(Path(d) / "dados")
+            t.trust("foco", "abc")
+            self.assertTrue(t.is_trusted("foco", "abc"))
+            fora = {k: os.path.join(outro, "perfil") for k in ("USERPROFILE", "APPDATA", "LOCALAPPDATA")}
+            with mock.patch.dict(os.environ, fora):
+                self.assertFalse(t.is_trusted("foco", "abc"))  # fora do perfil não vale
+
+    @posix_only
     def test_trust_roundtrip_and_permissions(self):
         with tempfile.TemporaryDirectory() as d:
             t = cu.Trust(Path(d) / "dados")
@@ -261,7 +282,8 @@ class TrustTest(unittest.TestCase):
             self.assertIsNone(cu.remembered(Path(d)))
             cu.remember(Path(d), "foco")
             self.assertEqual(cu.remembered(Path(d)), "foco")
-            self.assertEqual(stat.S_IMODE((Path(d) / "custom").stat().st_mode), 0o600)
+            if not WINDOWS:
+                self.assertEqual(stat.S_IMODE((Path(d) / "custom").stat().st_mode), 0o600)
             cu.remember(Path(d), None)
             self.assertIsNone(cu.remembered(Path(d)))
             with self.assertRaises(cu.CustomError):
@@ -269,11 +291,13 @@ class TrustTest(unittest.TestCase):
 
     def test_needs_trust_and_root(self):
         lay_ = L.parse({"coluna": [{"paineis": ["saida", "eco"]}], "painel": [
-            {"id": "eco", "tipo": "comando", "argv": ["echo", "oi"]}]}, "t", None)
+            {"id": "eco", "tipo": "comando", "argv": [ECHO, "oi"]}]}, "t", None)
         self.assertEqual(len(cu.needs_trust(lay_)), 1)
         self.assertEqual(cu.needs_trust(lay_)[0][1:], ("oi",))
         with tempfile.TemporaryDirectory() as d:
-            self.assertEqual(cu.custom_root(Path(d)), Path("~/.local/share/hud/custom").expanduser())
+            self.assertEqual(cu.custom_root(Path(d)), plat.default_data_dir() / "custom")
+            if not WINDOWS:
+                self.assertEqual(cu.custom_root(Path(d)), Path("~/.local/share/hud/custom").expanduser())
             (Path(d) / "pyproject.toml").write_text("")
             self.assertEqual(cu.custom_root(Path(d)), Path(d) / "custom")
 
@@ -317,9 +341,10 @@ class ProposalTest(unittest.TestCase):
             finally:
                 os.umask(old)
             self.assertEqual((nome, files), ("foco", ["notas.md", "layout.toml"]))
-            for f in files:
-                self.assertEqual(stat.S_IMODE((root / "foco" / f).stat().st_mode), 0o644)
-            self.assertEqual(stat.S_IMODE((root / "foco").stat().st_mode), 0o755)
+            if not WINDOWS:  # no Windows o modo não diz quem lê
+                for f in files:
+                    self.assertEqual(stat.S_IMODE((root / "foco" / f).stat().st_mode), 0o644)
+                self.assertEqual(stat.S_IMODE((root / "foco").stat().st_mode), 0o755)
             self.assertEqual(cu.load_custom(root, "foco").paineis["notas"].arquivo, "notas.md")
             ps2 = [cu.Proposal("foco", "notas.md", "# novo\n")]
             with self.assertRaises(cu.AlreadyExists):
@@ -327,7 +352,8 @@ class ProposalTest(unittest.TestCase):
             self.assertEqual((root / "foco" / "notas.md").read_text(), "# oi\n")
             cu.save_proposals(root, ps2, sobrescrever=True)
             self.assertEqual((root / "foco" / "notas.md").read_text(), "# novo\n")
-            self.assertEqual(stat.S_IMODE((root / "foco" / "notas.md").stat().st_mode), 0o644)
+            if not WINDOWS:
+                self.assertEqual(stat.S_IMODE((root / "foco" / "notas.md").stat().st_mode), 0o644)
 
     def test_save_refuses(self):
         with tempfile.TemporaryDirectory() as d:
@@ -347,11 +373,11 @@ class ProposalTest(unittest.TestCase):
                     cu.save_proposals(root, ps)
             self.assertFalse((root / "foco").exists())
             root.mkdir()
-            os.symlink(d, root / "link")
+            symlink(self, d, root / "link")
             with self.assertRaises(cu.CustomError):
                 cu.save_proposals(root, [cu.Proposal("link", "layout.toml", LAYOUT)], sobrescrever=True)
             (root / "foco").mkdir()
-            os.symlink("/etc/passwd", root / "foco" / "notas.md")
+            symlink(self, "/etc/passwd", root / "foco" / "notas.md")
             with self.assertRaises(cu.CustomError):
                 cu.save_proposals(root, [cu.Proposal("foco", "notas.md", "x"),
                                          cu.Proposal("foco", "layout.toml", LAYOUT)], sobrescrever=True)
@@ -366,7 +392,7 @@ class ListTest(unittest.TestCase):
                 (root / n).mkdir()
                 (root / n / "layout.toml").write_text(body)
             (root / "vazia").mkdir()
-            os.symlink(root / "b-ok", root / "c-link")
+            symlink(self, root / "b-ok", root / "c-link")
             (root / "solto.txt").write_text("x")
             got = cu.list_customs(root)
             self.assertEqual([g[0] for g in got], ["a-ruim", "b-ok", "c-link", "vazia"])
@@ -397,7 +423,8 @@ class PanelFeedTest(unittest.TestCase):
                 (base / "n.md").write_text("nova\n")
                 os.utime(base / "n.md", (time.time() + 5, time.time() + 5))
                 self.assertTrue(wait_for(lambda: f.lines("n") == ["nova"]))
-                (base / "n.md").unlink()
+                # No Windows apagar falha enquanto o feed está com o arquivo aberto: tenta de novo.
+                self.assertTrue(wait_for(lambda: _try_unlink(base / "n.md")))
                 self.assertTrue(wait_for(lambda: f.status("n").startswith("erro:")))
             finally:
                 f.stop()
@@ -417,8 +444,8 @@ class PanelFeedTest(unittest.TestCase):
             os.makedirs(f"{d}/home/.ssh")
             (Path(d) / "home/.ssh/id_x").write_text("SEGREDO\n")
             log.unlink()
-            os.symlink(f"{d}/home/.ssh/id_x", log)
-            with mock.patch.dict(os.environ, {"HOME": f"{d}/home"}):
+            symlink(self, f"{d}/home/.ssh/id_x", log)
+            with mock.patch.dict(os.environ, home_env(f"{d}/home")):
                 f = cu.PanelFeed(lay_, base, trusted=True, tick=0.05)
                 f.start()
                 try:
@@ -443,7 +470,8 @@ class PanelFeedTest(unittest.TestCase):
 
     def test_comando_trusted_and_untrusted(self):
         with tempfile.TemporaryDirectory() as d:
-            lay_, base = self.make(d, {"id": "eco", "tipo": "comando", "argv": ["echo", "oi\x1b[31m"],
+            argv = ECHO_ARGV if WINDOWS else ["echo", "oi\x1b[31m"]
+            lay_, base = self.make(d, {"id": "eco", "tipo": "comando", "argv": argv,
                                        "intervalo": 5, "timeout": 2})
             f = cu.PanelFeed(lay_, base, trusted=False, tick=0.05)
             f.start()
@@ -456,14 +484,17 @@ class PanelFeedTest(unittest.TestCase):
             f = cu.PanelFeed(lay_, base, trusted=True, tick=0.05)
             f.start()
             try:
-                self.assertTrue(wait_for(lambda: f.lines("eco") == ["oi"]))
+                if WINDOWS:
+                    self.assertTrue(wait_for(lambda: bool(f.lines("eco"))))
+                else:
+                    self.assertTrue(wait_for(lambda: f.lines("eco") == ["oi"]))
                 self.assertTrue(f.status("eco").startswith("há "))
             finally:
                 f.stop()
 
     def test_comando_timeout(self):
         with tempfile.TemporaryDirectory() as d:
-            lay_, base = self.make(d, {"id": "s", "tipo": "comando", "argv": ["sleep", "30"],
+            lay_, base = self.make(d, {"id": "s", "tipo": "comando", "argv": SLEEP,
                                        "timeout": 1})
             f = cu.PanelFeed(lay_, base, trusted=True, tick=0.05)
             f.start()

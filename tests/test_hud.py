@@ -6,12 +6,14 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from hud import agenda as ag
 from hud import config
 from hud.runner import Runner
 from hud.text import clean, fit, width, wrap
 from hud.vault import VaultWatcher, parse_board, parse_tasks
+from tests.suporte import ECHO, ECHO_ARGV, SLEEP, WINDOWS, fake_executable, posix_only, symlink, windows_only
 
 TODAY = dt.date(2026, 10, 8)  # quinta
 
@@ -62,7 +64,8 @@ class AgendaTest(unittest.TestCase):
             a.mark_done(a.items[0])
             b = ag.Agenda(a.path)
             self.assertEqual([(i.text, i.done) for i in b.items], [("café", True), ("treino", False)])
-            self.assertEqual(stat.S_IMODE(a.path.stat().st_mode), 0o600)
+            if not WINDOWS:
+                self.assertEqual(stat.S_IMODE(a.path.stat().st_mode), 0o600)
 
     def test_control_chars_do_not_break_the_file(self):
         i = ag.parse_entry("hoje x\x1b[2J\n- [ ] 2020-01-01 injetado", TODAY)
@@ -123,13 +126,13 @@ class VaultTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as outside:
             root = Path(d)
             (root / "p").mkdir()
-            (root / "p" / "Kanban (Teste).md").write_text(BOARD)
+            (root / "p" / "Kanban (Teste).md").write_text(BOARD, encoding="utf-8")
             (root / "p" / "a.sync-conflict-1.md").write_text("x")
             (root / ".obsidian").mkdir()
             (root / ".obsidian" / "z.md").write_text("x")
             Path(outside, "segredo.md").write_text("segredo")
-            os.symlink(outside, root / "link")
-            os.symlink(Path(outside, "segredo.md"), root / "p" / "s.md")
+            symlink(self, outside, root / "link")
+            symlink(self, Path(outside, "segredo.md"), root / "p" / "s.md")
             w = VaultWatcher(root)
             snap = w.scan()
             self.assertTrue(snap.ok)
@@ -146,9 +149,40 @@ class ConfigTest(unittest.TestCase):
                 config.build_command(0, {"name": "x", "argv": argv})
 
     def test_resolves_to_absolute_path(self):
-        c = config.build_command(0, {"name": "eco", "argv": ["echo", "oi"]})
+        c = config.build_command(0, {"name": "eco", "argv": [ECHO, "oi"]})
         self.assertTrue(os.path.isabs(c.argv[0]))
 
+    def test_default_commands_resolve(self):
+        """Os comandos padrão do sistema em que o teste roda existem e passam nas regras."""
+        cfg = config.load(Path(tempfile.gettempdir()) / "hud-nao-existe.toml")
+        self.assertEqual(cfg.source, "padrão")
+        self.assertGreaterEqual(len(cfg.commands), 3, cfg.warnings)
+
+    @windows_only
+    def test_windows_config_outside_profile_is_ignored(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as outro:
+            p = Path(d) / "config.toml"
+            p.write_text('[[command]]\nname = "x"\nargv = ["whoami"]\n')
+            self.assertEqual([c.name for c in config.load(p).commands], ["x"])
+            fora = {k: os.path.join(outro, "perfil") for k in ("USERPROFILE", "APPDATA", "LOCALAPPDATA")}
+            with mock.patch.dict(os.environ, fora):
+                cfg = config.load(p)
+            self.assertEqual(cfg.source, "padrão")
+            self.assertTrue(any("fora do seu perfil" in w for w in cfg.warnings), cfg.warnings)
+
+    @windows_only
+    def test_windows_refuses_cmd_and_batch(self):
+        for argv in (["cmd", "/c", "dir"], ["CMD.EXE"], ["powershell"], ["PowerShell.exe", "-c", "1"],
+                     ["wsl"], ["C:\\Windows\\System32\\cmd.exe"], ["rundll32"], ["cmd.exe."]):
+            with self.assertRaises(config.ConfigError, msg=argv):
+                config.build_command(0, {"name": "x", "argv": argv})
+        with tempfile.TemporaryDirectory() as d:
+            bat = Path(d) / "x.bat"
+            bat.write_text("@echo off\r\n")
+            with self.assertRaises(config.ConfigError):
+                config.build_command(0, {"name": "x", "argv": [str(bat)]})
+
+    @posix_only
     def test_rejects_world_writable_config(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "config.toml"
@@ -162,7 +196,8 @@ class ConfigTest(unittest.TestCase):
             self.assertEqual([c.name for c in cfg.commands], ["x"])
 
 
-class RunnerTest(unittest.TestCase):
+@posix_only
+class RunnerPosixTest(unittest.TestCase):
     def run_cmd(self, argv, **kw):
         q = queue.Queue()
         cmd = config.Command(key="1", name="t", argv=tuple(argv), **kw)
@@ -181,15 +216,36 @@ class RunnerTest(unittest.TestCase):
         lines, _ = self.run_cmd([config.resolve_executable("printf"), "a\\033]0;x\\007b"])
         self.assertEqual(lines, ["ab"])
 
-    def test_timeout_kills(self):
-        t0 = time.monotonic()
-        _, end = self.run_cmd([config.resolve_executable("sleep"), "30"], timeout=0.5)
-        self.assertTrue(end[4])
-        self.assertLess(time.monotonic() - t0, 5)
-
     def test_line_cap(self):
         lines, end = self.run_cmd([config.resolve_executable("seq"), "1000"], max_lines=10)
         self.assertEqual(len(lines), 10)
+        self.assertTrue(end[5])
+
+
+class RunnerTest(unittest.TestCase):
+    """Roda em todos os sistemas (no Windows: CREATE_NEW_PROCESS_GROUP e taskkill)."""
+    run_cmd = RunnerPosixTest.run_cmd
+
+    def test_runs_and_ends(self):
+        lines, end = self.run_cmd([config.resolve_executable(ECHO), *ECHO_ARGV[1:]])
+        self.assertEqual(end[2], 0)
+        self.assertTrue(lines and lines[0].strip())
+
+    def test_timeout_kills(self):
+        t0 = time.monotonic()
+        _, end = self.run_cmd([config.resolve_executable(SLEEP[0]), *SLEEP[1:]], timeout=0.5)
+        self.assertTrue(end[4])
+        self.assertLess(time.monotonic() - t0, 5)
+
+    @windows_only
+    def test_windows_env_and_line_cap(self):
+        from hud.runner import safe_env
+        env = safe_env()
+        self.assertEqual(env["PATH"], config.SAFE_PATH)
+        for k in ("SystemRoot", "TEMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PATHEXT", "COMSPEC"):
+            self.assertIn(k, env)
+        lines, end = self.run_cmd([config.resolve_executable("tasklist"), "/FO", "TABLE"], max_lines=3)
+        self.assertEqual(len(lines), 3)
         self.assertTrue(end[5])
 
 
@@ -223,6 +279,7 @@ class UsageTest(unittest.TestCase):
         self.assertAlmostEqual(e.five_hour.left, 85)
         self.assertIsNone(us.parse_event({"unifiedWindows": {"five_hour": {"utilization": 3}}}))
 
+    @posix_only
     def test_tracker_rejects_foreign_writable_cache(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "c.json"
@@ -235,20 +292,20 @@ class UsageTest(unittest.TestCase):
             self.assertEqual(t.current.five_hour.left, 50)
 
 
-_FAKE_AGENTS = None
+    @windows_only
+    def test_tracker_windows_outside_profile(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as outro:
+            p = Path(d) / "c.json"
+            p.write_text('{"five_hour_used": 50, "seven_day_used": 10, "fetched_at": 1}')
+            fora = {k: os.path.join(outro, "perfil") for k in ("USERPROFILE", "APPDATA", "LOCALAPPDATA")}
+            with mock.patch.dict(os.environ, fora):
+                self.assertFalse(us.UsageTracker(p).poll())
+            self.assertTrue(us.UsageTracker(p).poll())
 
 
 def fake_agent(name: str) -> str:
     """Executável falso para os testes não dependerem de claude/codex instalados (o CI não tem)."""
-    global _FAKE_AGENTS
-    if _FAKE_AGENTS is None:
-        _FAKE_AGENTS = tempfile.mkdtemp(prefix="hud-agentes-")
-        os.chmod(_FAKE_AGENTS, 0o700)
-    exe = Path(_FAKE_AGENTS) / name
-    if not exe.exists():
-        exe.write_text("#!/bin/sh\nexit 0\n")
-        os.chmod(exe, 0o700)
-    return str(exe)
+    return fake_executable(name)
 
 
 class ClaudeTest(unittest.TestCase):
@@ -259,6 +316,7 @@ class ClaudeTest(unittest.TestCase):
         self.assertEqual(argv[argv.index("--tools") + 1], "Read,Grep,Glob")
         self.assertEqual(argv[-2:], ["--resume", "abc"])
 
+    @posix_only
     def test_reads_are_scoped_and_secrets_denied(self):
         home = os.path.expanduser("~")
         cfg = ClaudeConfig(executable="/x/claude", cwd="/", read_dirs=(home + "/Vault", "/srv/dados"))
@@ -337,13 +395,15 @@ class FolderTest(unittest.TestCase):
     def test_remembered_folder_precedence_and_agents_follow(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as pasta:
             cfgp = Path(d) / "c.toml"
-            cfgp.write_text(f'data_dir = "{d}/dados"\nvault = "{d}"\n'
-                            f'[claude]\nexecutable = "{fake_agent("claude")}"\n'
-                            f'[codex]\nexecutable = "{fake_agent("codex")}"\n')
+            # Strings literais do TOML ('...'): caminhos do Windows têm barra invertida.
+            cfgp.write_text(f"data_dir = '{d}/dados'\nvault = '{d}'\n"
+                            f"[claude]\nexecutable = '{fake_agent('claude')}'\n"
+                            f"[codex]\nexecutable = '{fake_agent('codex')}'\n")
             os.chmod(cfgp, 0o600)
             self.assertEqual(config.load(cfgp).vault, Path(d))
             config.remember_folder(Path(d) / "dados", Path(pasta))
-            self.assertEqual(stat.S_IMODE((Path(d) / "dados" / "pasta").stat().st_mode), 0o600)
+            if not WINDOWS:
+                self.assertEqual(stat.S_IMODE((Path(d) / "dados" / "pasta").stat().st_mode), 0o600)
             cfg = config.load(cfgp)
             real = os.path.realpath(pasta)
             self.assertEqual((str(cfg.vault), cfg.folder_source), (real, "escolhida com /pasta"))
@@ -356,7 +416,7 @@ class FolderTest(unittest.TestCase):
     def test_generic_folder_scan(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            (root / "notas.txt").write_text("- [ ] pagar 📅 2026-10-10")
+            (root / "notas.txt").write_text("- [ ] pagar 📅 2026-10-10", encoding="utf-8")
             (root / "codigo.py").write_text("x")
             (root / "node_modules").mkdir()
             (root / "node_modules" / "lixo.md").write_text("x")
