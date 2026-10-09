@@ -145,15 +145,27 @@ $m.Remove('hud.exe')
 $d = Get-RelDir 'v0.7.0'
 New-Zip (Join-Path $d $asset) $m
 Set-Checksums $d
-# Binario que nao roda (sai com erro): nao pode trocar o instalado
+# Binario que nao roda: nao pode trocar o instalado. v0.8.0 nem e executavel (o
+# Process.Start lanca excecao: "not a valid application for this OS platform" no
+# Windows, "Exec format error" fora dele); v0.8.1 roda mas sai com erro.
 $d = Get-RelDir 'v0.8.0'
 $quebrado = Join-Path $work 'hud-quebrado.exe'
-if ($ehWindows) {
-    [IO.File]::WriteAllText($quebrado, 'isto nao e um executavel')
-} else {
-    [IO.File]::WriteAllText($quebrado, "#!/bin/sh`nexit 3`n")
-}
+[IO.File]::WriteAllText($quebrado, 'isto nao e um executavel')
 New-Zip (Join-Path $d $asset) (Get-MembrosPadrao $quebrado)
+Set-Checksums $d
+$d = Get-RelDir 'v0.8.1'
+$saiErro = Join-Path $work 'hud-sai-erro.exe'
+if ($ehWindows) {
+    $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+    if (-not (Test-Path -LiteralPath $csc)) { $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
+    $src = Join-Path $work 'sai-erro.cs'
+    [IO.File]::WriteAllText($src, 'class P { static int Main() { System.Console.Error.WriteLine("falta uma DLL"); return 3; } }')
+    & $csc /nologo /target:exe "/out:$saiErro" $src | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'csc falhou ao montar o hud.exe que sai com erro' }
+} else {
+    [IO.File]::WriteAllText($saiErro, "#!/bin/sh`necho 'falta uma DLL' >&2`nexit 3`n")
+}
+New-Zip (Join-Path $d $asset) (Get-MembrosPadrao $saiErro)
 Set-Checksums $d
 Copy-Item -LiteralPath $install -Destination (Join-Path $srv 'install.ps1')
 
@@ -342,7 +354,13 @@ try {
     if (Invoke-Installer @{ HUD_VERSION = 'v0.7.0' }) { Die 'aceitou pacote sem hud.exe' }
     if ((Out-Text) -notmatch 'Pacote incompleto') { Die 'mensagem do pacote incompleto' }
     if (Invoke-Installer @{ HUD_VERSION = 'v0.8.0' }) { Die 'aceitou binario que nao roda' }
-    if ((Out-Text) -notmatch 'n.{1,2}o roda nesta m.{1,2}quina') { Die 'mensagem do binario que nao roda' }
+    $o = Out-Text
+    if ($o -notmatch 'n.{1,2}o roda nesta m.{1,2}quina') { Die 'mensagem do binario que nao roda' }
+    if ($o -match 'Exception calling|Exce.{1,2}o ao chamar') { Die 'excecao crua do Process.Start no lugar da mensagem' }
+    if ((Sha $hudExe) -ne $antes) { Die 'binario mudou apos binario que nao roda' }
+    if (Invoke-Installer @{ HUD_VERSION = 'v0.8.1' }) { Die 'aceitou binario que sai com erro' }
+    $o = Out-Text
+    if ($o -notmatch 'n.{1,2}o roda nesta m.{1,2}quina' -or $o -notmatch 'falta uma DLL') { Die 'mensagem do binario que sai com erro' }
     if ((Sha $hudExe) -ne $antes) { Die 'binario mudou apos pacote ruim' }
     if (-not (Test-SemTemporario $dest)) { Die 'sobrou temporario apos pacote ruim' }
     Ok 'pacote com .., absoluto ou :, sem hud.exe ou com binario quebrado e recusado sem mexer no instalado'
@@ -468,3 +486,6 @@ try {
     if (-not $server.HasExited) { $server.Kill() }
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 }
+# Sucesso explicito: o "shell: pwsh" do GitHub Actions termina com exit $LASTEXITCODE,
+# e o ultimo comando nativo (o instalador que devia falhar) pode ter saido com 1.
+exit 0
