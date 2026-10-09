@@ -94,6 +94,8 @@ class Hud:
             self.agents["codex"] = Codex(cfg.codex, self.events)
         self.mode = "notas"  # ou o nome de um agente
         self.usage = us.UsageTracker()
+        self.codex_usage = us.CodexUsageTracker()
+        self.codex_usage.poll()
 
     # ── saída ────────────────────────────────────────────────────────────
     def say(self, text: str, style: str = "text") -> None:
@@ -131,6 +133,8 @@ class Hud:
                 if now - last_sample >= self.cfg.refresh:
                     self.metrics.sample()
                     self.usage.poll()
+                    if self.tick % 5 == 0:
+                        self.codex_usage.poll()
                     last_sample = now
                     self.tick += 1
                     dirty = True
@@ -281,8 +285,10 @@ class Hud:
         body = H - 3
         sys_h = 11
         use_h = 4
-        cmd_h = min(len(self.cfg.commands) + 2, max(4, body - sys_h - use_h - 5))
-        ag_h = body - sys_h - cmd_h - use_h
+        cx = self.codex_usage.current
+        cdx_h = max(3, len(cx.windows) + 2) if cx and cx.windows else 4
+        cmd_h = min(len(self.cfg.commands) + 2, max(4, body - sys_h - use_h - cdx_h - 5))
+        ag_h = body - sys_h - cmd_h - use_h - cdx_h
         vault_h = max(10, body * 55 // 100)
         out_h = body - vault_h
 
@@ -290,6 +296,7 @@ class Hud:
         self.draw_commands(sys_h, 0, cmd_h, lw)
         self.draw_agenda(sys_h + cmd_h, 0, ag_h, lw)
         self.draw_usage(sys_h + cmd_h + ag_h, 0, use_h, lw)
+        self.draw_usage_codex(sys_h + cmd_h + ag_h + use_h, 0, cdx_h, lw)
         self.draw_vault(0, lw, vault_h, rw)
         self.draw_output(vault_h, lw, out_h, rw)
         cy, cx = self.draw_input(body, 0, 3, W)
@@ -494,17 +501,30 @@ class Hud:
             self.put(y + 1, x + 2, "sem dado ainda: abra o Claude Code", "dim")
             self.put(y + 2, x + 2, "ou pergunte algo com /c", "dim")
             return
-        glyph = {"full": "██", "part": "▒▒", "empty": "░░"}
         for i, (label, win) in enumerate((("5h", u.five_hour), ("semana", u.seven_day))):
-            r, left = y + 1 + i, win.left
-            st = us.level(left)
-            nx = self.put(r, x + 2, f"{label:<7}", "dim")
-            nx = self.put(r, nx, f"{left:3.0f}% ", st)
-            for seg in us.segments(left):
-                nx = self.put(r, nx, glyph[seg], st if seg != "empty" else "dim") + 1
-            reset = us.until(win.resets_at)
-            if reset:
-                self.put(r, nx + 1, f"↺ {reset}", "dim", x + w - 2 - nx - 1)
+            self.usage_row(y + 1 + i, x, w, label, win.left, win.resets_at)
+
+    def usage_row(self, r: int, x: int, w: int, label: str, left: float, resets_at) -> None:
+        glyph = {"full": "██", "part": "▒▒", "empty": "░░"}
+        st = us.level(left)
+        nx = self.put(r, x + 2, f"{label:<7}", "dim")
+        nx = self.put(r, nx, f"{left:3.0f}% ", st)
+        for seg in us.segments(left):
+            nx = self.put(r, nx, glyph[seg], st if seg != "empty" else "dim") + 1
+        reset = us.until(resets_at)
+        if reset:
+            self.put(r, nx + 1, f"↺ {reset}", "dim", x + w - 2 - nx - 1)
+
+    def draw_usage_codex(self, y: int, x: int, h: int, w: int) -> None:
+        u = self.codex_usage.current
+        right = (f"{u.plan} · " if u and u.plan else "") + (
+            f"há {_ago(time.time() - u.fetched_at)}".replace("há agora", "agora") if u else "")
+        self.box(y, x, h, w, "USO CODEX", right)
+        if not u or not u.windows:
+            self.put(y + 1, x + 2, "sem dado ainda: use o Codex (/x)", "dim")
+            return
+        for i, win in enumerate(u.windows[: h - 2]):
+            self.usage_row(y + 1 + i, x, w, win.label, win.left, win.resets_at)
 
     def draw_input(self, y: int, x: int, h: int, w: int) -> tuple[int, int]:
         spin = SPIN[self.tick % len(SPIN)]
