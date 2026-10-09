@@ -1,0 +1,28 @@
+# Foco: a SAÍDA ocupa quase toda a tela. À esquerda ficam só os indicadores,
+# o uso dos planos e um painel de lembretes (texto do arquivo lembretes.md).
+# Sem COMANDOS e sem AGENDA; o Vault vai para baixo da saída, menor.
+
+nome = "foco"
+descricao = "Saída grande; sistema, uso e lembretes à esquerda; Vault pequeno embaixo"
+
+[[coluna]]
+largura = 30
+paineis = [
+  { id = "sistema", altura = 11 },
+  "uso_claude",
+  "uso_codex",
+  { id = "lembretes", peso = 1 },  # fica com o resto da coluna
+]
+
+[[coluna]]
+paineis = [
+  { id = "saida", peso = 75 },
+  { id = "vault", peso = 25 },
+]
+
+# Painel próprio do tipo texto: mostra um arquivo desta pasta.
+[[painel]]
+id = "lembretes"
+titulo = "LEMBRETES"
+tipo = "texto"
+arquivo = "lembretes.md"
