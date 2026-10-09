@@ -2,19 +2,19 @@
 
 Execução real do HUD num pseudo-terminal (pty) de 120×40, com `TERM=xterm-256color` e teclas de verdade. Os PNGs e o GIF são quadros renderizados da gravação, não capturas de tela do desktop. Todos os dados são de demonstração: HOME, Vault, agenda, comandos e cache de uso sintéticos, e o Claude e o Codex são scripts falsos que respondem no formato real. Só os números do painel SISTEMA (CPU, memória, disco) são da máquina que gravou.
 
-**Revisão gravada:** `289d790`, em 2026-10-08. Para gravar de novo: `python3 scripts/record-screens.py` (o HUD continua sem dependências; só a renderização usa Pillow, num ambiente virtual temporário).
+**Revisão gravada:** `27659aa`, em 2026-10-09. Para gravar de novo: `python3 scripts/record-screens.py` (o HUD continua sem dependências; só a renderização usa Pillow, num ambiente virtual temporário).
 
-![Tela inicial no modo notas: sistema, comandos, agenda, uso do Claude, Vault ao vivo e a saída.](docs/telas/01-notas.png)
+![Tela inicial no modo notas: sistema, comandos, agenda, uso do Claude, Vault ao vivo e a saída na aba NOTAS.](docs/telas/01-notas.png)
 
-Tela inicial no modo notas: sistema, comandos, agenda, uso do Claude, Vault ao vivo e a saída.
+Tela inicial no modo notas: sistema, comandos, agenda, uso do Claude, Vault ao vivo e a saída na aba NOTAS.
 
-![Modo Claude (laranja): uma pergunta e a resposta do Claude falso.](docs/telas/02-claude.png)
+![Aba e modo Claude (laranja): uma pergunta e a resposta do Claude falso.](docs/telas/02-claude.png)
 
-Modo Claude (laranja): uma pergunta e a resposta do Claude falso.
+Aba e modo Claude (laranja): uma pergunta e a resposta do Claude falso.
 
-![Modo Codex (cinza): a pergunta e a resposta chegando do Codex falso.](docs/telas/03-codex.png)
+![Aba e modo Codex (cinza): a pergunta e a resposta chegando do Codex falso.](docs/telas/03-codex.png)
 
-Modo Codex (cinza): a pergunta e a resposta chegando do Codex falso.
+Aba e modo Codex (cinza): a pergunta e a resposta chegando do Codex falso.
 
 ![/ajuda na saída.](docs/telas/04-ajuda.png)
 
