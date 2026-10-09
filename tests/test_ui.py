@@ -379,7 +379,7 @@ executable = {q(str(self.codex_exe))}
         self.assertIn("minha nota de teste", notes.read_text(encoding="utf-8"))
         self.hud.type("/ajuda")
         self.hud.wait_for("Segurança")
-        self.hud.wait_for("nunca escreve no Vault")
+        self.hud.wait_for("só escreve na pasta")
 
     def test_03_comandos_e_escape_hostil(self):
         self.hud.send(F2)

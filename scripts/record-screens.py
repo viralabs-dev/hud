@@ -473,7 +473,7 @@ def run_session(demo: dict, stage: Path) -> dict:
         sess.wait_for(lambda s: "ENTRADA" in input_title(s), "entrada no modo notas")
         sess.type("/limpar", "/limpar", 0.3)
         sess.type("/ajuda", "/ajuda")
-        sess.wait_all("Segurança", "nunca escreve no Vault")
+        sess.wait_all("Segurança", "só escreve na pasta")
         sess.scene("04-ajuda")
 
         # 5. rolagem da saída
