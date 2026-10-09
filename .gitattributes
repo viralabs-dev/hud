@@ -1,0 +1,7 @@
+# LF em todo checkout, inclusive no Windows (o runner windows-latest liga o
+# core.autocrlf): os scripts bash rodam no Git Bash, e LICENSE, LICENSES/ e
+# THIRD_PARTY_NOTICES.md entram iguais nos pacotes das três plataformas.
+* text=auto eol=lf
+*.png binary
+*.gif binary
+docs/telas/hud-demo.pty.txt -text

@@ -1,0 +1,16 @@
+PDCurses (https://pdcurses.org/, https://github.com/wmcbrine/PDCurses)
+Embutido no binário do Windows, ligado estaticamente nas extensões _curses e
+_curses_panel do windows-curses (que usa a cópia do PDCurses em
+https://github.com/zephyrproject-rtos/PDCurses, porte "wincon" para o console
+do Windows).
+
+Situação legal, conforme o README do PDCurses ("Legal Stuff"):
+
+  The core package and most ports are in the public domain, but a few files
+  in the demos and X11 directories are subject to copyright under licenses
+  described there.
+
+  This software is provided AS IS with NO WARRANTY whatsoever.
+
+O binário do HUD só usa o núcleo (pdcurses/) e o porte wincon/, que estão em
+domínio público; nem os demos nem o porte X11 são incluídos.

@@ -6,10 +6,11 @@
 #      encodings, hud...) no diretório atual e em PYTHONPATH/PYTHONHOME/
 #      PYTHONSTARTUP não podem ser carregados. Se algum for, ele grava uma
 #      marca e o teste falha.
-# Uso: packaging/smoke.sh caminho/do/hud
+# Uso: packaging/smoke.sh caminho/do/hud      (Linux e macOS; no Windows, smoke.ps1)
 set -euo pipefail
 
-bin="$(readlink -f "${1:?uso: packaging/smoke.sh caminho/do/hud}")"
+arg="${1:?uso: packaging/smoke.sh caminho/do/hud}"
+bin="$(cd "$(dirname "$arg")" && pwd -P)/$(basename "$arg")"  # sem readlink -f (macOS antigo)
 [[ -x "$bin" ]] || { echo "Não executável: $bin" >&2; exit 1; }
 dir="$(mktemp -d)"
 trap 'rm -rf -- "$dir"' EXIT
