@@ -16,6 +16,7 @@ import fcntl
 import json
 import os
 import pty
+import re
 import select
 import shutil
 import signal
@@ -343,7 +344,10 @@ executable = {q(str(self.codex_exe))}
 
     def test_02_texto_vira_nota_e_ajuda(self):
         self.hud.type("minha nota de teste")
-        self.hud.wait_for("› minha nota de teste")
+        # A linha da SAÍDA tem o horário (“HH:MM › …”); só “› …” também casaria com
+        # a própria ENTRADA, antes de a nota ser gravada (corrida vista no macOS).
+        self.hud.wait_for(lambda s: re.search(r"\d\d:\d\d › minha nota de teste", s.text()) is not None,
+                          what="nota na saída")
         notes = self.data / "notas.md"
         self.assertTrue(notes.exists())
         self.assertEqual(stat.S_IMODE(notes.stat().st_mode), 0o600)
