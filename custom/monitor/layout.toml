@@ -1,4 +1,5 @@
 # Monitor: três colunas, com o log do sistema e as portas abertas.
+# Só Linux: usa /var/log/syslog e o comando `ss`; no macOS e no Windows o carregamento recusa.
 # Precisa de um terminal largo (cada coluna tem no mínimo 30 colunas).
 #
 # O painel PORTAS roda um comando. Por segurança, ele só roda depois que você
