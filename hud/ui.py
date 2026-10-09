@@ -25,6 +25,8 @@ from . import plataforma as plat
 from .config import Command, Config, ConfigError, remember_folder, validate_folder
 from .metrics import Metrics, human_bytes, human_duration
 from . import custom as cu
+from . import docs as dc
+from . import skills as sk
 from . import layout as lay
 from . import usage as us
 from .claude import Claude
@@ -64,6 +66,11 @@ Entrada
   /vault · relê a pasta agora · /limpar · limpa a aba aberta · /sair
   /pasta caminho · lê outra pasta local no lugar do Vault (lembrada) · /pasta vault · volta ao Vault
   /custom lista · customizações · /custom nome · usa · /custom padrao · volta · /custom salvar · grava a proposta do agente
+Skills e projetos (com o agente do modo; nas notas, o Claude ou o Codex)
+  /skills [filtro] · lista as skills do HUD, do Claude Code e do Codex · /skill nome [pedido] · usa uma skill
+  /project · lista os projetos da pasta · /project pedido · cria um projeto novo no modelo do Vault, ou consulta
+  /doc pedido · planeja e escreve documentação no modelo, ou consulta (skill projeto-docs)
+  /doc salvar · grava na pasta os arquivos .md que o agente propôs (pede s para sobrescrever) · /doc descartar
   Os comandos / do HUD valem em qualquer modo (notas, Claude, Codex); só os do Claude vão para ele.
 Claude Code (laranja) e Codex (cinza)
   /c pergunta · pergunta ao Claude · /x pergunta · pergunta ao Codex (a conversa continua)
@@ -76,7 +83,8 @@ Claude Code (laranja) e Codex (cinza)
     completo: o mesmo Claude Code / Codex do seu terminal (ferramentas, MCP, skills)
 Segurança
   Só rodam os comandos da lista: sem shell, PATH e ambiente fixos, tempo-limite e saída limitada.
-  O HUD nunca escreve no Vault. Texto de fora tem as sequências de escape removidas."""
+  O HUD só escreve na pasta (o Vault ou a de /pasta) com /doc salvar: arquivos .md propostos, sem sair da pasta.
+  Texto de fora tem as sequências de escape removidas."""
 
 
 @dataclass
@@ -127,16 +135,23 @@ class Hud:
         self.custom_name = ""
         self.feed: cu.PanelFeed | None = None
         self.proposals: list[cu.Proposal] = []
+        self.doc_proposals: dict[str, dc.DocProposal] = {}  # arquivo → proposta (vale a última)
         self.clip: tuple[int, int, int] | None = None  # (y0, y1, x1) do painel em desenho
         self.layout_note = ""
-        # Os agentes leem as customizações e a skill para propor layouts.
-        self.agent_extra_reads = tuple(str(p) for p in (self.custom_root, cu.templates_root(), cu.skill_dir())
+        # Os agentes leem as customizações e as skills do HUD (layouts, modelos de documentação).
+        self.agent_extra_reads = tuple(str(p) for p in (self.custom_root, cu.templates_root(), cu.skills_root())
                                        if p and p.is_dir())
         for agent in self.agents.values():
-            agent.context = cu.agent_context(self.custom_root)
+            agent.context = self.agent_context()
             if hasattr(agent.cfg, "read_dirs") and agent.cfg.follow_folder:
                 agent.cfg = dataclasses.replace(
                     agent.cfg, read_dirs=tuple(dict.fromkeys((*agent.cfg.read_dirs, *self.agent_extra_reads))))
+
+    def agent_context(self) -> str:
+        return (cu.agent_context(self.custom_root) + " Para criar projetos ou documentação na pasta do HUD "
+                f"({self.cfg.vault}), siga a skill projeto-docs: dentro do HUD responda com um bloco "
+                "````hud-doc arquivo=\"<caminho relativo à pasta>\" por arquivo .md, sem gravar nada, e diga ao "
+                "usuário para digitar /doc salvar.")
 
     # ── saída ────────────────────────────────────────────────────────────
     @property
@@ -267,6 +282,17 @@ class Hud:
                     self.proposals = found
                     nomes = ", ".join(sorted({f"{p.nome}/{p.arquivo}" for p in found}))
                     self.say(f"✦ proposta de customização: {nomes} · /custom salvar para gravar", "ok", ev[1])
+                docs = dc.parse_doc_proposals(ev[2])
+                if docs:
+                    for d in docs:
+                        self.doc_proposals[d.arquivo] = d
+                    n = len(self.doc_proposals)
+                    self.say(f"✦ proposta de documentação: {n} arquivo(s) para {self.cfg.vault} · "
+                             "/doc salvar grava · /doc descartar", "ok", ev[1])
+                    for arq in list(self.doc_proposals)[:12]:
+                        self.say(f"    {arq}", "dim", ev[1])
+                    if n > 12:
+                        self.say(f"    … e mais {n - 12}", "dim", ev[1])
             elif kind == "agent_tool":
                 self.say(f"  ⚙ {ev[2]}", f"{ev[1]}_dim", ev[1])
             elif kind == "agent_denied":
@@ -1020,7 +1046,7 @@ class Hud:
         else:
             self.note(line)
 
-    def ask(self, name: str, prompt: str) -> None:
+    def ask(self, name: str, prompt: str, shown: str | None = None) -> None:
         agent = self.agents.get(name)
         if not agent:
             self.say(f"{name} desligado (veja os avisos no início ou hud --check)", "warn")
@@ -1035,7 +1061,7 @@ class Hud:
         self.scrolls[name] = 0
         self.say("", "blank", name)
         self.say(f"{time.strftime('%H:%M:%S')}  ✦ {name} · {agent.profile} · {cont}", name, name)
-        self.say(f"você › {prompt}", name, name)
+        self.say(f"você › {shown or prompt}", name, name)
         if name != self.mode:
             n = next(k for k, m in MODE_KEYS.items() if m == name)
             self.say(f"→ pergunta enviada ao {name}: a resposta sai na aba {name.upper()} (Alt+{n})", "dim")
@@ -1097,6 +1123,14 @@ class Hud:
             else:
                 self.say("  ".join("/" + c for c in cmds), "claude")
                 self.say("no modo Claude, digite o comando direto; nomes que o HUD usa vão com //", "dim")
+        elif verb == "/skills":
+            self.list_skills(arg)
+        elif verb == "/skill":
+            self.use_skill(arg)
+        elif verb in ("/project", "/projeto", "/projetos"):
+            self.project_cmd(arg)
+        elif verb in ("/doc", "/docs"):
+            self.doc_cmd(arg)
         elif verb == "/custom":
             self.custom_cmd(arg)
         elif verb == "/pasta":
@@ -1137,13 +1171,127 @@ class Hud:
             extra = ({"read_dirs": (str(target), *self.agent_extra_reads)}
                      if hasattr(agent.cfg, "read_dirs") else {})
             agent.cfg = dataclasses.replace(agent.cfg, cwd=str(target), **extra)
+            agent.context = self.agent_context()
             agent.new_session()
             moved.append(name)
         self.say(f"pasta: {target}" + (" (de volta ao Vault)" if back else " · lembrada para a próxima vez"), "ok")
         if moved:
             self.say(f"{' e '.join(moved)} agora trabalham e leem nesta pasta; conversa nova", "dim")
+        if self.doc_proposals:
+            self.doc_proposals = {}
+            self.say("propostas de documentação descartadas (eram para a pasta anterior)", "dim")
         if target == Path.home():
             self.say("⚠ é a sua home inteira: varredura pesada e os agentes leem tudo fora da lista de segredos", "warn")
+
+    # ── skills, projetos e documentação ──────────────────────────────────
+    def skills(self) -> list[sk.Skill]:
+        return sk.discover(sk.skill_dirs(cu.skills_root()))
+
+    def doc_agent(self) -> str:
+        """O agente do modo; nas notas, o Claude (ou o Codex, se só ele estiver ligado)."""
+        if self.mode in self.agents:
+            return self.mode
+        return "claude" if "claude" in self.agents else next(iter(self.agents), "")
+
+    def list_skills(self, filtro: str = "") -> None:
+        items = [s for s in self.skills() if filtro.lower() in f"{s.nome} {s.descricao}".lower()]
+        self.header(f"skills ({len(items)})" + (f" com “{filtro}”" if filtro else ""))
+        if not items:
+            self.say("nenhuma · as skills ficam em ~/.claude/skills, ~/.codex/skills e nas do HUD", "dim")
+        for s in items:
+            self.say(f"{s.nome:<22} {'+'.join(s.origens):<16} {s.descricao}", "accent" if "hud" in s.origens else "text")
+        if items:
+            self.say("/skill nome [pedido] usa uma skill com o agente do modo (nas notas, o Claude)", "dim")
+
+    def use_skill(self, arg: str, intencao: str = "", shown: str = "") -> None:
+        nome, _, pedido = arg.partition(" ")
+        if not nome:
+            self.say("uso: /skill nome [pedido] · /skills lista as skills", "warn")
+            return
+        name = self.doc_agent()
+        if not name:
+            self.say("Claude e Codex desligados: as skills precisam de um agente (veja hud --check)", "warn")
+            return
+        skill = sk.find(self.skills(), nome)
+        if not skill:
+            self.say(f"não achei a skill “{nome}” · /skills lista as que existem", "warn")
+            return
+        try:
+            texto = sk.read_skill(skill)
+        except (sk.SkillError, OSError) as e:
+            self.say(f"skill {skill.nome}: {e}", "warn")
+            return
+        if not self.agents[name].busy:
+            self.doc_proposals = {}  # uma resposta nova traz a proposta inteira
+        self.ask(name, sk.skill_prompt(skill, texto, pedido.strip(), intencao),
+                 shown or f"/skill {skill.nome} {pedido.strip()}".rstrip())
+
+    def projects_summary(self) -> tuple[list[dc.Project], str]:
+        try:
+            projs = dc.find_projects(self.cfg.vault)
+        except OSError:
+            projs = []
+        lista = "; ".join(f"{p.nome} ({p.pasta})" for p in projs[:60]) or "nenhum"
+        return projs, lista
+
+    def project_cmd(self, arg: str) -> None:
+        projs, lista = self.projects_summary()
+        if not arg or arg.lower() in ("lista", "listar"):
+            self.header(f"projetos em {self.cfg.vault} ({len(projs)})")
+            for p in projs:
+                self.say(f"{p.nome:<24} {p.pasta}", "accent")
+            if not projs:
+                self.say("nenhum projeto no modelo (pasta com NN-backlog/Kanban (Nome).md ou Nome.md)", "dim")
+            self.say("/project pedido · cria um projeto novo ou consulta com o agente (skill projeto-docs)", "dim")
+            return
+        self.use_skill(f"projeto-docs {arg}", (
+            f"Intenção: /project. Se o pedido for para criar um projeto, monte o projeto completo no modelo, na "
+            f"pasta do HUD ({self.cfg.vault}), ao lado dos projetos que já existem; se for para listar ou ler, só "
+            f"responda, sem blocos de arquivo. Projetos encontrados pelo HUD: {lista}."), f"/project {arg}")
+
+    def doc_cmd(self, arg: str) -> None:
+        sub = arg.split()[0].lower() if arg else ""
+        if not sub:
+            n = len(self.doc_proposals)
+            self.say(f"uso: /doc pedido · /doc salvar · /doc descartar"
+                     + (f" · {n} arquivo(s) proposto(s) esperando" if n else ""), "dim")
+        elif sub == "salvar":
+            self.save_docs()
+        elif sub in ("descartar", "limpar"):
+            self.doc_proposals = {}
+            self.say("propostas de documentação descartadas", "dim")
+        else:
+            _, lista = self.projects_summary()
+            self.use_skill(f"projeto-docs {arg}", (
+                f"Intenção: /doc. Se o pedido for para documentar, planeje primeiro (o que criar ou atualizar e por "
+                f"quê) e depois mande os arquivos no modelo, na pasta do HUD ({self.cfg.vault}); se for para listar "
+                f"ou ler, só responda, sem blocos de arquivo. Projetos encontrados pelo HUD: {lista}."), f"/doc {arg}")
+
+    def save_docs(self, overwrite: bool = False) -> None:
+        props = list(self.doc_proposals.values())
+        if not props:
+            self.say("nenhuma proposta de documentação · peça com /doc ou /project e depois /doc salvar", "dim")
+            return
+        root = self.cfg.vault
+        try:
+            if not overwrite:
+                _, existentes = dc.plan(root, props)
+                if existentes:
+                    self.header(f"{len(existentes)} arquivo(s) já existem em {root}:")
+                    for e in existentes[:20]:
+                        self.say(f"  {e}", "warn")
+                    if len(existentes) > 20:
+                        self.say(f"  … e mais {len(existentes) - 20}", "warn")
+                    self.pending = Ask(f"sobrescrever {len(existentes)} arquivo(s)", lambda: self.save_docs(True))
+                    return
+            gravados = dc.save_docs(root, props, sobrescrever=overwrite)
+        except (dc.DocError, OSError) as e:
+            self.say(f"documentação não gravada: {e}", "warn")
+            return
+        self.doc_proposals = {}
+        self.header(f"✓ {len(gravados)} arquivo(s) gravado(s) em {root}")
+        for g in gravados:
+            self.say(f"  {g}", "ok")
 
     def set_profile(self, arg: str) -> None:
         parts = arg.split()

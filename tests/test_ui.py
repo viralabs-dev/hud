@@ -76,7 +76,9 @@ for ev in (
      "slash_commands": ["review", "context"]},
     {"type": "assistant", "message": {"content": [{"type": "text", "text": "resposta falsa"}]}},
     *([{"type": "assistant", "message": {"content": [{"type": "text", "text": PROPOSTA_JSON}]}}]
-      if "PROPOSTA" in data else []),
+      if "PROPOSTA" in data and "DOCPROPOSTA" not in data else []),
+    *([{"type": "assistant", "message": {"content": [{"type": "text", "text": DOCS_JSON}]}}]
+      if "DOCPROPOSTA" in data else []),
     {"type": "result", "subtype": "success", "is_error": False, "session_id": "s1",
      "total_cost_usd": 0.01},
 ):
@@ -96,6 +98,28 @@ paineis = ["saida"]
 ```
 
 Digite /custom salvar e depois /custom proposta."""
+
+# O que o agente responde quando segue a skill projeto-docs dentro do HUD: dois
+# arquivos válidos (um com ``` dentro) e um caminho hostil, que o HUD descarta.
+DOCS_TEXTO = """Plano: criar o projeto Beta.
+
+````hud-doc arquivo="Beta/Beta.md"
+# Beta (projeto de teste)
+
+```bash
+echo dentro-do-bloco
+```
+````
+
+````hud-doc arquivo="Beta/06-backlog/Kanban (Beta).md"
+## A fazer
+````
+
+````hud-doc arquivo="../fora-da-pasta.md"
+nunca
+````
+
+Digite /doc salvar para gravar."""
 
 LAYOUT_ECO = """nome = "eco"
 descricao = "Painel de comando para testar a confiança"
@@ -237,7 +261,8 @@ class UiTest(unittest.TestCase):
                                ("codex", FAKE_CODEX, cls.codex_log)):
             exe = bindir / name
             exe.write_text(src.replace("LOG", json.dumps(str(log)))
-                           .replace("PROPOSTA_JSON", json.dumps(PROPOSTA_TEXTO)), encoding="utf-8")
+                           .replace("PROPOSTA_JSON", json.dumps(PROPOSTA_TEXTO))
+                           .replace("DOCS_JSON", json.dumps(DOCS_TEXTO)), encoding="utf-8")
             os.chmod(exe, 0o700)
         cls.claude_exe, cls.codex_exe = bindir / "claude", bindir / "codex"
         cls.env = {
@@ -511,6 +536,53 @@ executable = {q(str(self.codex_exe))}
         self.hud.send(ALT[1])
         self.wait_input("ENTRADA", "›")
         self.hud.wait_for("a resposta sai na aba CLAUDE")
+
+    def test_14_skills_project_e_doc_salvar(self):
+        s = self.hud.screen
+        alfa = self.vault / "Alfa" / "06-backlog"
+        alfa.mkdir(parents=True)
+        (alfa / "Kanban (Alfa).md").write_text(KANBAN, encoding="utf-8")
+        self.addCleanup(shutil.rmtree, self.vault / "Alfa", ignore_errors=True)
+        self.addCleanup(shutil.rmtree, self.vault / "Beta", ignore_errors=True)
+        # /skills lista as do HUD (repositório) em qualquer modo.
+        self.hud.type("/skills")
+        self.hud.wait_for("projeto-docs")
+        self.assertIn("hud-custom", s.text())
+        # /project sem texto: lista local, sem agente.
+        self.hud.type("/project")
+        self.hud.wait_for("projetos em")
+        self.hud.wait_for("Alfa")
+        self.assertEqual(self.calls(self.claude_log), [])
+        # /project com pedido, das notas: vai ao Claude com a skill; a resposta propõe arquivos.
+        self.hud.type("/project crie o Beta DOCPROPOSTA")
+        self.hud.wait_for("2 CLAUDE ●")
+        call = self.calls(self.claude_log)[-1]
+        self.assertTrue(call["stdin"].startswith("[Skill projeto-docs"))
+        self.assertIn("Intenção: /project", call["stdin"])
+        self.assertIn("Alfa (Alfa)", call["stdin"])
+        self.assertTrue(call["stdin"].rstrip().endswith("Pedido: crie o Beta DOCPROPOSTA"))
+        self.hud.send(ALT[2])
+        self.hud.wait_for("proposta de documentação: 2 arquivo(s)")
+        self.assertIn("você › /project crie o Beta DOCPROPOSTA", s.text())
+        self.assertFalse((self.vault / "Beta").exists())  # nada gravado antes de /doc salvar
+        self.hud.type("/doc salvar")
+        self.hud.wait_for("2 arquivo(s) gravado(s)")
+        moc = (self.vault / "Beta" / "Beta.md").read_text(encoding="utf-8")
+        self.assertIn("echo dentro-do-bloco", moc)
+        self.assertTrue((self.vault / "Beta" / "06-backlog" / "Kanban (Beta).md").is_file())
+        self.assertFalse((self.vault.parent / "fora-da-pasta.md").exists())
+        # De novo: os arquivos já existem, então pede s para sobrescrever.
+        (self.vault / "Beta" / "Beta.md").write_text("antigo\n", encoding="utf-8")
+        self.hud.type("/limpar")
+        self.hud.wait_for(lambda s: "gravado(s)" not in s.text(), what="aba limpa")
+        self.hud.type("/doc reescreva DOCPROPOSTA")
+        self.hud.wait_for("proposta de documentação: 2 arquivo(s)")
+        self.hud.type("/doc salvar")
+        self.hud.wait_for("sobrescrever 2 arquivo(s)")
+        self.assertEqual((self.vault / "Beta" / "Beta.md").read_text(encoding="utf-8"), "antigo\n")
+        self.hud.send("s")
+        self.hud.wait_for("2 arquivo(s) gravado(s)")
+        self.assertIn("echo dentro-do-bloco", (self.vault / "Beta" / "Beta.md").read_text(encoding="utf-8"))
 
     def test_08_roda_do_mouse_rola_a_saida(self):
         self.hud.type("/ajuda")
