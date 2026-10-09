@@ -347,3 +347,9 @@ nunca lê seu token OAuth.
 ```bash
 python3 -m unittest discover -s tests -t .
 ```
+
+## Licença
+
+MIT — ver [`LICENSE`](LICENSE). O binário embute componentes de terceiros
+(Python, ncurses, zlib, bootloader do PyInstaller), com os avisos em
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) e [`LICENSES/`](LICENSES/).

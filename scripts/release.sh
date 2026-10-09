@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Gera o binário autocontido do HUD para a máquina atual (linux amd64 ou arm64)
 # e o pacote de release:
-#   dist/hud_linux_<arch>.tar.gz  (hud + THIRD_PARTY_NOTICES.md + LICENSES/)
+#   dist/hud_linux_<arch>.tar.gz  (hud + LICENSE + THIRD_PARTY_NOTICES.md + LICENSES/)
 #   dist/checksums.txt            (sha256 de todos os dist/hud_*.tar.gz)
 #
 # Uso: scripts/release.sh <tag>      ex.: scripts/release.sh v0.4.0
@@ -53,7 +53,7 @@ asset="hud_linux_${arch}.tar.gz"
 stage="$work/stage"
 mkdir -p "$stage/LICENSES" dist
 install -m 755 "$bin" "$stage/hud"
-install -m 644 THIRD_PARTY_NOTICES.md "$stage/"
+install -m 644 LICENSE THIRD_PARTY_NOTICES.md "$stage/"
 install -m 644 LICENSES/*.txt "$stage/LICENSES/"
 # Pacote reproduzível: ordem, dono e datas fixos.
 epoch="$(git log -1 --format=%ct 2>/dev/null || echo 0)"

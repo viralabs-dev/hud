@@ -22,6 +22,9 @@ class PyprojectTest(unittest.TestCase):
         self.assertEqual(self.project["requires-python"], ">=3.11")
         self.assertEqual(self.data["build-system"]["build-backend"], "setuptools.build_meta")
         self.assertIn("version", self.project["dynamic"])
+        self.assertEqual(self.project["license"], "MIT")
+        self.assertEqual(self.project["license-files"], ["LICENSE"])
+        self.assertIn("MIT License", (ROOT / "LICENSE").read_text(encoding="utf-8"))
         self.assertEqual(self.data["tool"]["setuptools"]["dynamic"]["version"], {"attr": "hud.__version__"})
         self.assertRegex(hud.__version__, r"^\d+\.\d+\.\d+$")  # a tag vX.Y.Z do release tem de bater
 

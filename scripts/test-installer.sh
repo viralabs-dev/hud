@@ -29,9 +29,13 @@ make_release() { # make_release <tag> <versão> [pacote real]
   else
     printf '#!/bin/sh\necho "hud %s"\n' "$2" > "$stage/hud"
     chmod 755 "$stage/hud"
-    cp "$root/THIRD_PARTY_NOTICES.md" "$stage/"
+    cp "$root/LICENSE" "$root/THIRD_PARTY_NOTICES.md" "$stage/"
     cp "$root"/LICENSES/*.txt "$stage/LICENSES/"
-    tar -czf "$dir/$asset" -C "$stage" hud THIRD_PARTY_NOTICES.md LICENSES
+    if [[ "$1" == v0.1.0 ]]; then  # pacote antigo, sem LICENSE: continua instalável
+      tar -czf "$dir/$asset" -C "$stage" hud THIRD_PARTY_NOTICES.md LICENSES
+    else
+      tar -czf "$dir/$asset" -C "$stage" hud LICENSE THIRD_PARTY_NOTICES.md LICENSES
+    fi
   fi
   (cd "$dir" && sha256sum "$asset" > checksums.txt)
 }
@@ -90,6 +94,7 @@ run() { # run VAR=valor... ; roda o instalador como no `curl | bash`
 run || die 'instalação latest'
 [[ "$("$dest/hud" --version)" == "$latest_v" ]] || die "latest não instalou $latest_v"
 [[ -f "$dest/hud-licenses/THIRD_PARTY_NOTICES.md" ]] || die 'avisos não instalados'
+cmp -s "$root/LICENSE" "$dest/hud-licenses/LICENSE" || die 'licença MIT do HUD não instalada'
 for f in "$root"/LICENSES/*.txt; do
   cmp -s "$f" "$dest/hud-licenses/LICENSES/$(basename "$f")" || die "licença ausente: $(basename "$f")"
 done

@@ -80,6 +80,7 @@ fi
 notices=(THIRD_PARTY_NOTICES.md)
 while IFS= read -r m; do
   case "$m" in
+    LICENSE) notices+=("$m") ;;  # licença MIT do HUD (pacotes desde a v0.5.1)
     LICENSES/*.txt) [[ "$m" =~ ^LICENSES/[A-Za-z0-9._-]+\.txt$ ]] && notices+=("$m") ;;
   esac
 done < <(tar -tzf "$tmp/$asset")

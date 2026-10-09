@@ -1,11 +1,13 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "hud"
 description = "HUD de terminal numa tela só: sistema, comandos permitidos, agenda, Vault, Claude Code e Codex."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = []
 dynamic = ["version"]

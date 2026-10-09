@@ -35,4 +35,4 @@ O `hashlib` usa as implementações internas do CPython.
 - PyInstaller: <https://github.com/pyinstaller/pyinstaller> (versão fixada em
   `packaging/requirements-build.txt`).
 
-O próprio HUD ainda não declara uma licença.
+O próprio HUD é distribuído sob a licença MIT (arquivo `LICENSE`, que vai no pacote e é instalado em `~/.local/bin/hud-licenses/LICENSE`).
