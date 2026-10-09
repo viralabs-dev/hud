@@ -486,6 +486,32 @@ executable = {q(str(self.codex_exe))}
         self.hud.wait_for(lambda s: "AGENDA" not in s.text() and "SAÍDA" in s.text(), what="layout da proposta")
         shutil.rmtree(self.custom / "proposta")
 
+    def test_13_abas_da_saida(self):
+        s = self.hud.screen
+        self.hud.wait_for("1 NOTAS")
+        self.assertIn("2 CLAUDE", s.text())
+        self.assertIn("3 CODEX", s.text())
+        # Pergunta feita nas notas: a resposta vai para a aba do Claude, que ganha ●.
+        self.hud.type("/c pergunta das abas")
+        self.hud.wait_for("a resposta sai na aba CLAUDE")
+        self.hud.wait_for("2 CLAUDE ●")
+        self.assertNotIn("resposta falsa", s.text())
+        self.assertNotIn("você › pergunta das abas", s.text())
+        # Clique na aba: abre o Claude, o ● some e a entrada passa a ir para ele.
+        row, col = s.find("2 CLAUDE ●")
+        self.hud.send(f"\x1b[<0;{col + 1};{row + 1}M\x1b[<0;{col + 1};{row + 1}m".encode())
+        self.wait_input("CLAUDE · LEITURA", "✦", ORANGE)
+        self.hud.wait_for("resposta falsa")
+        self.assertIn("você › pergunta das abas", s.text())
+        self.assertNotIn("2 CLAUDE ●", s.text())
+        self.assertNotIn("a resposta sai na aba CLAUDE", s.text())
+        # /limpar limpa só a aba aberta.
+        self.hud.type("/limpar")
+        self.hud.wait_for(lambda s: "resposta falsa" not in s.text(), what="aba do Claude limpa")
+        self.hud.send(ALT[1])
+        self.wait_input("ENTRADA", "›")
+        self.hud.wait_for("a resposta sai na aba CLAUDE")
+
     def test_08_roda_do_mouse_rola_a_saida(self):
         self.hud.type("/ajuda")
         self.hud.wait_for("Segurança")
@@ -568,10 +594,12 @@ class RawMouseTest(unittest.TestCase):
         from unittest import mock
 
         from hud.ui import Hud
-        hud = SimpleNamespace(scroll=scroll, scr=self.Scr(rest))
-        hud.wheel = lambda b: Hud.wheel(hud, b)
+        hud = SimpleNamespace(scroll=scroll, scr=self.Scr(rest), clicks=[])
+        hud.wheel = lambda b, *a: Hud.wheel(hud, b, *a)
+        hud.click = lambda row, col: hud.clicks.append((row, col))
         with mock.patch("curses.unget_wch", create=True) as unget:
             Hud.raw_mouse(hud)
+        self.clicks = hud.clicks
         return hud.scroll, hud.scr.chars, unget
 
     def test_sgr_e_x10(self):
@@ -580,8 +608,14 @@ class RawMouseTest(unittest.TestCase):
         self.assertEqual(self.run_seq("<65;10;10M")[0], 0)
         self.assertEqual(self.run_seq("M`**")[:2], (3, []))
         self.assertEqual(self.run_seq("Ma**", scroll=3)[:2], (0, []))
-        # Clique comum e soltura (m) não rolam.
-        self.assertEqual(self.run_seq("<0;10;10M")[0], 0)
+        # Clique esquerdo não rola: vira clique (linha, coluna) a partir de 0, para as abas.
+        self.assertEqual(self.run_seq("<0;10;5M")[0], 0)
+        self.assertEqual(self.clicks, [(4, 9)])
+        self.assertEqual(self.run_seq("M" + chr(32) + chr(33 + 9) + chr(33 + 4))[0], 0)
+        self.assertEqual(self.clicks, [(4, 9)])
+        # Soltura (m) não faz nada.
+        self.assertEqual(self.run_seq("<0;10;5m")[0], 0)
+        self.assertEqual(self.clicks, [])
         self.assertEqual(self.run_seq("<64;10;10m")[0], 0)
 
     def test_outra_sequencia_devolve_o_caractere(self):

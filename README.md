@@ -1,6 +1,6 @@
 # hud
 
-HUD de terminal numa tela só, sem abas: indicadores do sistema, painel de
+HUD de terminal numa tela só (a SAÍDA tem uma aba por modo: notas, Claude e Codex): indicadores do sistema, painel de
 comandos permitidos, agenda, uso do plano Claude e do Codex, entrada/saída de texto ligada ao
 Claude Code e ao Codex local, e o Vault do Obsidian ao vivo. O layout é
 customizável: cada painel vai onde você quiser, e dá para criar painéis próprios.
@@ -298,7 +298,7 @@ diretório atual: um `json.py` ou `curses.py` plantado não é carregado
 | `/ag amanhã 14h dentista` | agenda (`hoje`, `amanhã`, `+3`, `sex`, `12/10`, `2026-10-12`; hora `14h`, `9:30`) |
 | `/ok N` · `/rm N` | conclui · apaga o item N da agenda |
 | `/r N` · `/r nome` | roda um comando do painel (também F1–F10) |
-| Alt+1 · Alt+2 · Alt+3 | entrada em notas · Claude · Codex (Tab alterna entre os três) |
+| Alt+1 · Alt+2 · Alt+3 | abre a aba e a entrada de notas · Claude · Codex (Tab alterna entre os três; clicar na aba também) |
 | `/pasta caminho` · `/pasta vault` | lê outra pasta local no lugar do Vault (lembrada) · volta ao Vault |
 | `/b termo` | busca no Vault, nome e conteúdo |
 | `/notas [N]` · `/conflitos` · `/vault` | últimas notas · conflitos de sync · relê o Vault |
@@ -309,10 +309,17 @@ diretório atual: um `json.py` ou `curses.py` plantado não é carregado
 | `/novo` · `/parar` | nova conversa · interrompe a resposta |
 | `/custom lista` · `/custom nome` | lista as customizações de `custom/` · usa uma (lembrada) |
 | `/custom padrao` · `/custom salvar` | volta ao layout embutido · grava a proposta que um agente fez |
-| `/limpar` · `/ajuda` · `/sair` | |
+| `/limpar` · `/ajuda` · `/sair` | `/limpar` limpa só a aba aberta |
 
 Os comandos `/` do HUD valem em qualquer modo da entrada (notas, Claude ou
 Codex); só os comandos `/` próprios do Claude Code são repassados ao Claude.
+
+**Abas da SAÍDA.** Cada modo tem a sua aba, com o próprio histórico e a própria
+rolagem: `1 NOTAS`, `2 CLAUDE` (laranja) e `3 CODEX` (cinza), na borda de cima
+da SAÍDA. A aba aberta é sempre a do modo da entrada. A resposta de um agente
+vai para a aba dele mesmo quando a pergunta saiu de outra (`/c …` nas notas), e
+a aba ganha um `●` até ser aberta. O resultado de um comando do painel (F1–F10)
+e de uma busca volta para a aba de onde ele foi lançado.
 
 A roda do mouse (ou PgUp/PgDn) rola a saída, ↑/↓ percorrem o histórico, Esc limpa a linha.
 Com o mouse ligado, selecione texto com Shift+arrastar.

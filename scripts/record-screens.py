@@ -89,9 +89,9 @@ FORBIDDEN = GENERIC_FORBIDDEN + personal_patterns()
 
 # Cenas: (arquivo do PNG, legenda). O instante de cada uma vai para o metadata.
 SCENES = {
-    "01-notas": "Tela inicial no modo notas: sistema, comandos, agenda, uso do Claude, Vault ao vivo e a saída.",
-    "02-claude": "Modo Claude (laranja): uma pergunta e a resposta do Claude falso.",
-    "03-codex": "Modo Codex (cinza): a pergunta e a resposta chegando do Codex falso.",
+    "01-notas": "Tela inicial no modo notas: sistema, comandos, agenda, uso do Claude, Vault ao vivo e a saída na aba NOTAS.",
+    "02-claude": "Aba e modo Claude (laranja): uma pergunta e a resposta do Claude falso.",
+    "03-codex": "Aba e modo Codex (cinza): a pergunta e a resposta chegando do Codex falso.",
     "04-ajuda": "/ajuda na saída.",
     "05-rolagem": "Saída rolada para cima com a roda do mouse.",
     "06-pasta": "/pasta com um projeto de exemplo no lugar do Vault.",

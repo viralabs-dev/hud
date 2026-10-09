@@ -41,16 +41,19 @@ MAX_INPUT = 500
 WHEEL_UP = getattr(curses, "BUTTON4_PRESSED", 0)
 WHEEL_DOWN = getattr(curses, "BUTTON5_PRESSED", 0x200000)
 WHEEL_STEP = 3
+CLICK = getattr(curses, "BUTTON1_PRESSED", 0) | getattr(curses, "BUTTON1_CLICKED", 0)
 MODE_KEYS = {"1": "notas", "2": "claude", "3": "codex"}  # Alt+1/2/3
+TABS = tuple(MODE_KEYS.values())  # cada modo tem a sua aba na SAÍDA
 # PDCurses manda Alt+N como uma tecla só (ALT_1...); o ncurses manda Esc + N.
 ALT_KEYS = {getattr(curses, f"ALT_{n}"): m for n, m in MODE_KEYS.items() if hasattr(curses, f"ALT_{n}")}
 
 HELP = """\
 Teclas
   F1–F10 ou /r N · roda o comando do painel
-  Alt+1 notas · Alt+2 Claude · Alt+3 Codex · Tab alterna entre os três
+  Alt+1 notas · Alt+2 Claude · Alt+3 Codex · Tab alterna entre os três (ou clique na aba)
+  A SAÍDA tem uma aba por modo; ● = aba com saída nova ainda não vista
   Enter · envia a linha · ↑/↓ · histórico · Esc · limpa a linha
-  roda do mouse ou PgUp/PgDn · rola a saída · Ctrl+L · redesenha · Ctrl+C · sai
+  roda do mouse ou PgUp/PgDn · rola a aba aberta · Ctrl+L · redesenha · Ctrl+C · sai
 Entrada
   texto livre · vira nota com data e hora (notas.md, fora do Vault)
   /r N ou /r nome · roda um comando do painel
@@ -58,7 +61,7 @@ Entrada
   /ok N · conclui o item N da agenda · /rm N · apaga
   /b termo · busca no Vault (nome e conteúdo, só leitura)
   /notas [N] · últimas notas · /conflitos · conflitos de sync do Vault
-  /vault · relê a pasta agora · /limpar · limpa a saída · /sair
+  /vault · relê a pasta agora · /limpar · limpa a aba aberta · /sair
   /pasta caminho · lê outra pasta local no lugar do Vault (lembrada) · /pasta vault · volta ao Vault
   /custom lista · customizações · /custom nome · usa · /custom padrao · volta · /custom salvar · grava a proposta do agente
   Os comandos / do HUD valem em qualquer modo (notas, Claude, Codex); só os do Claude vão para ele.
@@ -95,8 +98,13 @@ class Hud:
         self.agenda = ag.Agenda(cfg.data_dir / "agenda.md")
         self.agenda.prune(dt.date.today())
         self.notes_path = cfg.data_dir / "notas.md"
-        self.out: deque[tuple[str, str]] = deque(maxlen=3000)
-        self.scroll = 0
+        # Uma saída por aba (notas, claude, codex), cada uma com a sua rolagem.
+        self.outs: dict[str, deque[tuple[str, str]]] = {t: deque(maxlen=3000) for t in TABS}
+        self.scrolls: dict[str, int] = dict.fromkeys(TABS, 0)
+        self.unread: set[str] = set()
+        self.cmd_tabs: dict[str, str] = {}  # comando do painel → aba onde foi lançado
+        self.search_tab = "notas"
+        self.tab_hits: list[tuple[int, int, int, str]] = []  # (linha, x0, x1, aba) para o clique
         self.inp = ""
         self.cur = 0
         self.history: list[str] = []
@@ -131,15 +139,35 @@ class Hud:
                     agent.cfg, read_dirs=tuple(dict.fromkeys((*agent.cfg.read_dirs, *self.agent_extra_reads))))
 
     # ── saída ────────────────────────────────────────────────────────────
-    def say(self, text: str, style: str = "text") -> None:
-        for line in text.split("\n"):
-            self.out.append((style, line))
-        if self.scroll:
-            self.scroll += text.count("\n") + 1
+    @property
+    def out(self) -> deque[tuple[str, str]]:
+        """A saída da aba aberta (a do modo atual)."""
+        return self.outs[self.mode]
 
-    def header(self, text: str) -> None:
-        self.out.append(("blank", ""))
-        self.out.append(("head", f"{time.strftime('%H:%M:%S')}  {text}"))
+    @property
+    def scroll(self) -> int:
+        return self.scrolls[self.mode]
+
+    @scroll.setter
+    def scroll(self, value: int) -> None:
+        self.scrolls[self.mode] = value
+
+    def tabs(self) -> list[str]:
+        return ["notas", *(t for t in TABS if t in self.agents)]
+
+    def say(self, text: str, style: str = "text", tab: str | None = None) -> None:
+        tab = tab if tab in self.outs else self.mode
+        for line in text.split("\n"):
+            self.outs[tab].append((style, line))
+        if self.scrolls[tab]:
+            self.scrolls[tab] += text.count("\n") + 1
+        if tab != self.mode:
+            self.unread.add(tab)
+
+    def header(self, text: str, tab: str | None = None) -> None:
+        tab = tab if tab in self.outs else self.mode
+        self.say("", "blank", tab)
+        self.say(f"{time.strftime('%H:%M:%S')}  {text}", "head", tab)
 
     # ── ciclo ────────────────────────────────────────────────────────────
     def run(self, scr) -> None:
@@ -153,7 +181,7 @@ class Hud:
         # Só a roda importa. Com o mouse ligado o terminal passa os cliques
         # para o HUD; para selecionar texto, Shift+arrastar.
         try:
-            curses.mousemask(WHEEL_UP | WHEEL_DOWN)
+            curses.mousemask(WHEEL_UP | WHEEL_DOWN | CLICK)
             curses.mouseinterval(0)
         except (curses.error, AttributeError):  # PDCurses/terminal sem mouse
             pass
@@ -221,47 +249,49 @@ class Hud:
             if kind == "cmd_out":
                 _, cmd, lines = ev
                 for line in lines:
-                    self.say(line, "text")
+                    self.say(line, "text", self.cmd_tabs.get(cmd.key))
             elif kind == "cmd_end":
                 _, cmd, rc, dur, timed_out, truncated = ev
+                tab = self.cmd_tabs.get(cmd.key)
                 extra = " · saída cortada" if truncated else ""
                 if timed_out:
-                    self.say(f"✗ {cmd.name}: interrompido após {cmd.timeout:.0f}s{extra}", "crit")
+                    self.say(f"✗ {cmd.name}: interrompido após {cmd.timeout:.0f}s{extra}", "crit", tab)
                 elif rc == 0:
-                    self.say(f"✓ {cmd.name} · {dur:.1f}s{extra}", "ok")
+                    self.say(f"✓ {cmd.name} · {dur:.1f}s{extra}", "ok", tab)
                 else:
-                    self.say(f"✗ {cmd.name} · código {rc} · {dur:.1f}s{extra}", "warn")
+                    self.say(f"✗ {cmd.name} · código {rc} · {dur:.1f}s{extra}", "warn", tab)
             elif kind == "agent_text":
-                self.say(ev[2], ev[1])
+                self.say(ev[2], ev[1], ev[1])
                 found = cu.parse_proposals(ev[2])
                 if found:
                     self.proposals = found
                     nomes = ", ".join(sorted({f"{p.nome}/{p.arquivo}" for p in found}))
-                    self.say(f"✦ proposta de customização: {nomes} · /custom salvar para gravar", "ok")
+                    self.say(f"✦ proposta de customização: {nomes} · /custom salvar para gravar", "ok", ev[1])
             elif kind == "agent_tool":
-                self.say(f"  ⚙ {ev[2]}", f"{ev[1]}_dim")
+                self.say(f"  ⚙ {ev[2]}", f"{ev[1]}_dim", ev[1])
             elif kind == "agent_denied":
-                self.say(f"  ⊘ negado: {ev[2]}", "warn")
+                self.say(f"  ⊘ negado: {ev[2]}", "warn", ev[1])
             elif kind == "usage_event":
                 self.usage.offer(us.parse_event(ev[1]))
             elif kind == "agent_end":
                 _, name, ok, msg, dur, summary = ev
                 tail = (f" · {dur:.0f}s" if dur is not None else "") + (f" · {summary}" if summary else "")
                 if ok:
-                    self.say(f"✓ {name}{tail}", name)
+                    self.say(f"✓ {name}{tail}", name, name)
                 else:
-                    self.say(f"✗ {name}: {msg}{tail}", "warn")
+                    self.say(f"✗ {name}: {msg}{tail}", "warn", name)
             elif kind == "search":
                 _, term, hits = ev
+                tab = self.search_tab
                 if not hits:
-                    self.say(f"nada encontrado para “{term}”", "dim")
+                    self.say(f"nada encontrado para “{term}”", "dim", tab)
                 for rel, n, line in hits:
                     loc = f"{rel}:{n}" if n else rel
-                    self.say(f"{loc}", "accent")
+                    self.say(f"{loc}", "accent", tab)
                     if line:
-                        self.say(f"    {line}", "text")
+                        self.say(f"    {line}", "text", tab)
                 if hits:
-                    self.say(f"{len(hits)} resultado(s)", "dim")
+                    self.say(f"{len(hits)} resultado(s)", "dim", tab)
 
     # ── cores ────────────────────────────────────────────────────────────
     def _colors(self) -> None:
@@ -567,10 +597,33 @@ class Hud:
         self.scroll = min(self.scroll, max_scroll)
         start = len(lines) - ih - self.scroll
         view = lines[max(0, start): max(0, start) + ih]
+        self.box(y, x, h, w, "SAÍDA")
+        nx = self.draw_tabs(y, x + 2 + width(" SAÍDA ") + 1, x + w - 2)
         right = f"↑ {self.scroll} linhas · roda ou PgDn volta" if self.scroll else "roda do mouse · PgUp/PgDn"
-        self.box(y, x, h, w, "SAÍDA", right)
+        room = x + w - 2 - nx - 2
+        if room >= 8:
+            r = fit(f" {right} ", room)
+            self.put(y, x + w - 2 - width(r), r, "dim")
         for i, (style, text) in enumerate(view):
             self.put(y + 1 + i, x + 2, text, style)
+
+    def draw_tabs(self, y: int, x: int, end: int) -> int:
+        """As abas na borda da SAÍDA: a aberta em destaque, ● nas que têm saída nova."""
+        self.tab_hits = []
+        num = {m: k for k, m in MODE_KEYS.items()}
+        for tab in self.tabs():
+            label = f" {num[tab]} {tab.upper()}{' ●' if tab in self.unread else ''} "
+            if x + width(label) > end:
+                break
+            color = {"notas": "accent"}.get(tab, tab)
+            if tab == self.mode:
+                attr = self.style[color] | curses.A_REVERSE | curses.A_BOLD
+            else:
+                attr = self.style[color] | (curses.A_BOLD if tab in self.unread else curses.A_DIM)
+            self.put(y, x, label, attr)
+            self.tab_hits.append((y, x, x + width(label), tab))
+            x += width(label) + 1
+        return x
 
     def draw_usage(self, y: int, x: int, h: int, w: int) -> None:
         u = self.usage.current
@@ -777,7 +830,7 @@ class Hud:
             if len(modes) == 1:
                 self.say("Claude e Codex desligados (veja os avisos no início ou hud --check)", "warn")
                 return
-            self.mode = modes[(modes.index(self.mode) + 1) % len(modes)]
+            self.set_mode(modes[(modes.index(self.mode) + 1) % len(modes)])
             return
         if isinstance(ch, int) and ch in ALT_KEYS:
             self.set_mode(ALT_KEYS[ch])
@@ -843,20 +896,31 @@ class Hud:
             self.say(f"{mode} desligado (veja os avisos no início ou hud --check)", "warn")
             return
         self.mode = mode
+        self.unread.discard(mode)
+
+    def click(self, row: int, col: int) -> None:
+        for y, x0, x1, tab in self.tab_hits:
+            if row == y and x0 <= col < x1:
+                self.set_mode(tab)
+                return
 
     def mouse(self) -> None:
         try:
-            _, _, _, _, bstate = curses.getmouse()
+            _, mx, my, _, bstate = curses.getmouse()
         except curses.error:
             return
-        if bstate & WHEEL_UP:
+        if bstate & CLICK:
+            self.click(my, mx)
+        elif bstate & WHEEL_UP:
             self.scroll += WHEEL_STEP
         elif bstate & WHEEL_DOWN:
             self.scroll = max(0, self.scroll - WHEEL_STEP)
 
-    def wheel(self, button: int) -> None:
-        """Botão do protocolo xterm: 64 = roda para cima, 65 = para baixo."""
-        if button & 64 and not button & 128:
+    def wheel(self, button: int, col: int = -1, row: int = -1) -> None:
+        """Botão do protocolo xterm: 64 = roda para cima, 65 = para baixo, 0 = clique esquerdo."""
+        if button == 0 and row >= 0:
+            self.click(row, col)
+        elif button & 64 and not button & 128:
             if button & 3 == 0:
                 self.scroll += WHEEL_STEP
             elif button & 3 == 1:
@@ -890,14 +954,15 @@ class Hud:
                 else:
                     return
                 if c == "M":
-                    head = buf.split(";", 1)[0]
-                    if head.isdigit():
-                        self.wheel(int(head))
+                    parts = buf.split(";")
+                    if len(parts) == 3 and all(q.isdigit() for q in parts):
+                        self.wheel(int(parts[0]), int(parts[1]) - 1, int(parts[2]) - 1)
+                    elif parts[0].isdigit():
+                        self.wheel(int(parts[0]))
             elif c == "M":
-                b = nxt()
-                nxt(), nxt()  # coluna e linha
+                b, cx, cy = nxt(), nxt(), nxt()  # botão, coluna e linha (+32)
                 if b:
-                    self.wheel(ord(b) - 32)
+                    self.wheel(ord(b) - 32, ord(cx) - 33 if cx else -1, ord(cy) - 33 if cy else -1)
             elif c is not None:
                 try:
                     curses.unget_wch(c)
@@ -930,6 +995,7 @@ class Hud:
         if self.runner.is_running(cmd):
             self.say(f"{cmd.name} ainda está rodando", "dim")
             return
+        self.cmd_tabs[cmd.key] = self.mode
         self.header(f"▶ [{cmd.key}] {cmd.name}")
         self.say("$ " + " ".join([os.path.basename(cmd.argv[0]), *cmd.argv[1:]]), "dim")
         self.scroll = 0
@@ -966,9 +1032,13 @@ class Hud:
             self.say(f"o {name} ainda está respondendo · /parar interrompe", "warn")
             return
         cont = "continua a conversa" if agent.session.id else "conversa nova"
-        self.out.append(("blank", ""))
-        self.out.append((name, f"{time.strftime('%H:%M:%S')}  ✦ {name} · {agent.profile} · {cont}"))
-        self.out.append((name, f"você › {prompt}"))
+        self.scrolls[name] = 0
+        self.say("", "blank", name)
+        self.say(f"{time.strftime('%H:%M:%S')}  ✦ {name} · {agent.profile} · {cont}", name, name)
+        self.say(f"você › {prompt}", name, name)
+        if name != self.mode:
+            n = next(k for k, m in MODE_KEYS.items() if m == name)
+            self.say(f"→ pergunta enviada ao {name}: a resposta sai na aba {name.upper()} (Alt+{n})", "dim")
         agent.ask(prompt)
 
     def current_agent(self, arg: str = ""):
@@ -1145,6 +1215,7 @@ class Hud:
         if len(term) < 2:
             self.say("uso: /b termo (mínimo 2 letras)", "warn")
             return
+        self.search_tab = self.mode
         self.header(f"busca no Vault: “{term}”")
         threading.Thread(
             target=lambda: self.events.put(("search", term, self.vault.search(term))),
