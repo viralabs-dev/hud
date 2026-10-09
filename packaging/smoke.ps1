@@ -141,9 +141,9 @@ enabled = false
     $pastas = @(Get-ChildItem -LiteralPath $skills -Directory -Force).Count
     if ($n -lt 1 -or $n -ne $pastas) { Fail "$n skills instaladas, $pastas pastas em .claude\skills" $r.Out }
     Write-Output "   $n skills instaladas"
-    foreach ($f in @(@('projeto-docs', 'SKILL.md'), @('projeto-docs', 'modelos', 'kanban.md'))) {
-        $alvo = [IO.Path]::Combine(@($skills) + $f)
-        if (-not (Test-Path -LiteralPath $alvo)) { Fail "a skill projeto-docs veio sem $($f -join '/')" $r.Out }
+    $pd = Join-Path $skills 'projeto-docs'
+    foreach ($alvo in @((Join-Path $pd 'SKILL.md'), (Join-Path (Join-Path $pd 'modelos') 'kanban.md'))) {
+        if (-not (Test-Path -LiteralPath $alvo)) { Fail "a skill projeto-docs veio sem $alvo" $r.Out }
     }
 
     Write-Output '== isolamento (modulos plantados)'

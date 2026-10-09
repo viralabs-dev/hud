@@ -11,10 +11,8 @@ def make(base: Path, pasta: str, texto: str | bytes) -> Path:
     d = base / pasta
     d.mkdir(parents=True, exist_ok=True)
     f = d / "SKILL.md"
-    if isinstance(texto, bytes):
-        f.write_bytes(texto)
-    else:
-        f.write_text(texto, encoding="utf-8")
+    # Bytes sempre: write_text troca \n por \r\n no Windows.
+    f.write_bytes(texto if isinstance(texto, bytes) else texto.encode("utf-8"))
     return d
 
 
