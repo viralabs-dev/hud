@@ -24,19 +24,20 @@ classifiers = [
 # (hud/__main__.py → main()). Ver "Rodar" no README.
 
 [tool.setuptools]
-# hud._modelos e hud._skill são só dados: os modelos de custom/ e a skill
-# hud-custom, embutidos no pacote para quem instala pelo pipx (o binário leva
+# hud._modelos e hud._skills são só dados: os modelos de custom/ e todas as
+# skills de skills/ (cada uma numa subpasta com SKILL.md, às vezes com subpastas
+# como modelos/), embutidos no pacote para quem instala pelo pipx (o binário leva
 # a mesma cópia; ver packaging/hud.spec e hud/custom.py).
-packages = ["hud", "hud._modelos", "hud._skill"]
+packages = ["hud", "hud._modelos", "hud._skills"]
 script-files = ["scripts/hud"]
 
 [tool.setuptools.package-dir]
 "hud._modelos" = "custom"
-"hud._skill" = "skills/hud-custom"
+"hud._skills" = "skills"
 
 [tool.setuptools.package-data]
 "hud._modelos" = ["README.md", "*/*.toml", "*/*.md", "*/*.txt"]
-"hud._skill" = ["*.md"]
+"hud._skills" = ["*/*.md", "*/*.txt", "*/*.toml", "*/*/*.md", "*/*/*.txt", "*/*/*.toml"]
 
 [tool.setuptools.dynamic]
 version = { attr = "hud.__version__" }

@@ -124,8 +124,23 @@ enabled = false
     New-Item -ItemType Directory -Path (Join-Path $homeDir '.claude') | Out-Null
     $r = Invoke-Hud @('--instalar-skill')
     $skill = [IO.Path]::Combine($homeDir, '.claude', 'skills', 'hud-custom', 'SKILL.md')
-    if ($r.Code -ne 0 -or -not (Test-Path -LiteralPath $skill)) { Fail 'hud --instalar-skill nao instalou a skill' $r.Out }
+    if ($r.Code -ne 0 -or -not (Test-Path -LiteralPath $skill)) { Fail 'hud --instalar-skill nao instalou a skill hud-custom' $r.Out }
     Write-Output $r.Out.TrimEnd()
+    # Every embedded skill: one "<dest>: instalada" line per skill for Claude,
+    # each with SKILL.md, and no extra or missing folder in .claude\skills.
+    $skills = [IO.Path]::Combine($homeDir, '.claude', 'skills')
+    $n = 0
+    foreach ($linha in ($r.Out -split "`r?`n")) {
+        if ($linha -notmatch '^(.*?): (.*)$') { continue }
+        $dest = $Matches[1]; $sit = $Matches[2]
+        if ([IO.Path]::GetDirectoryName($dest) -ne $skills) { continue }
+        if ($sit -ne 'instalada') { Fail "skill nao instalada no Claude: $linha" $r.Out }
+        if (-not (Test-Path -LiteralPath (Join-Path $dest 'SKILL.md'))) { Fail "$dest sem SKILL.md" $r.Out }
+        $n++
+    }
+    $pastas = @(Get-ChildItem -LiteralPath $skills -Directory -Force).Count
+    if ($n -lt 1 -or $n -ne $pastas) { Fail "$n skills instaladas, $pastas pastas em .claude\skills" $r.Out }
+    Write-Output "   $n skills instaladas"
 
     Write-Output '== isolamento (modulos plantados)'
     $mods = 're json curses os sys locale argparse pathlib tomllib subprocess threading ctypes sitecustomize usercustomize'.Split(' ')
