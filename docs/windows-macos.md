@@ -12,6 +12,8 @@ integrar ao README (seções Segurança e Configuração).
 | Configuração | `~/.config/hud/config.toml` | `~/.config/hud/config.toml` | `%APPDATA%\hud\config.toml` |
 | Dados (agenda, notas, `pasta`, `custom`, confiança) | `~/.local/share/hud` | `~/.local/share/hud` | `%LOCALAPPDATA%\hud` |
 | Customizações fora do repositório | `~/.local/share/hud/custom` | `~/.local/share/hud/custom` | `%LOCALAPPDATA%\hud\custom` |
+| Modelos e skill embutidos (binário e pipx, só leitura) | `hud/_modelos`, `hud/_skill` dentro do pacote | o mesmo | o mesmo |
+| Destino de `hud --instalar-skill` | `~/.claude/skills`, `~/.codex/skills` | o mesmo | `%USERPROFILE%\.claude\skills`, `%USERPROFILE%\.codex\skills` |
 | PATH fixo dos comandos | `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin` | o mesmo | `%SystemRoot%\System32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SystemRoot%\System32\WindowsPowerShell\v1.0` |
 | Quem pode ter escrito o arquivo | dono e modo (`st_uid`, grupo/outros) | o mesmo | o lugar: só dentro do seu perfil (sem ler ACL) |
 | Link no último componente | `O_NOFOLLOW` | `O_NOFOLLOW` | `lstat` recusa reparse point (link e junção) antes de abrir e confere o arquivo aberto depois |
