@@ -4,7 +4,8 @@ HUD de terminal numa tela só, sem abas: indicadores do sistema, painel de
 comandos permitidos, agenda, uso do plano Claude, entrada/saída de texto ligada ao
 Claude Code e ao Codex local, e o Vault do Obsidian ao vivo.
 
-Python 3.11+ e só a biblioteca padrão (curses, tomllib). Nada para instalar.
+Python 3.11+ e só a biblioteca padrão (curses, tomllib): nenhuma dependência.
+Instala com `pipx install ~/dev/hud` ou roda direto do repositório (ver *Rodar*).
 
 ```
 ╭ SISTEMA ─────────╮╭ VAULT · ao vivo ───────────────────────╮
