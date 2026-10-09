@@ -2,6 +2,10 @@
 # fora do repositorio e numa pasta temporaria:
 #   1. hud.exe --version
 #   2. hud.exe --check -c <config so do usuario> (Claude e Codex desligados, sai com 0)
+#      No Windows a config, o Vault e os dados ficam dentro do perfil simulado
+#      (USERPROFILE = <tmp>\home): fora dele o HUD recusa a config. Numa sessao
+#      elevada (o runner do GitHub roda como administrador) o --check sai com 1
+#      so pelo aviso "rodando como administrador"; esse caso e aceito.
 #   3. isolamento: modulos plantados (re, json, curses, os, sitecustomize,
 #      encodings, hud...) no diretorio atual e em PYTHONPATH/PYTHONHOME/
 #      PYTHONSTARTUP nao podem ser carregados. Se algum for, ele grava uma
@@ -64,13 +68,25 @@ function Invoke-Hud {
     return [pscustomobject]@{ Code = $p.ExitCode; Out = $out.Result + $err.Result }
 }
 
+function Test-CheckOk($r) {
+    # --check: 0, ou 1 quando o unico aviso e o de sessao elevada (Windows).
+    if ($r.Code -eq 0) { return $true }
+    if ($r.Code -ne 1 -or $naoWindows) { return $false }
+    $avisos = @([regex]::Matches($r.Out, '(?m)^aviso: .*$') | ForEach-Object { $_.Value.Trim() })
+    if ($avisos.Count -eq 0) { return $false }
+    foreach ($a in $avisos) { if ($a -notmatch '^aviso: rodando como administrador') { return $false } }
+    return $true
+}
+
 function Fail([string]$msg, [string]$out = '') {
     if ($out) { [Console]::Error.WriteLine($out) }
     throw "FALHOU: $msg"
 }
 
 try {
-    New-Item -ItemType Directory -Path (Join-Path $dir 'home'), (Join-Path $dir 'vault') | Out-Null
+    $homeDir = Join-Path $dir 'home'
+    $vault = Join-Path $homeDir 'vault'
+    New-Item -ItemType Directory -Path $homeDir, $vault | Out-Null
     $mark = Join-Path $dir 'MARCA'
 
     Write-Output '== hud --version'
@@ -79,11 +95,11 @@ try {
     Write-Output $r.Out.Trim()
 
     # TOML com strings literais ('...'): as barras invertidas do Windows ficam como estao.
-    $cfg = Join-Path $dir 'config.toml'
+    $cfg = Join-Path $homeDir 'config.toml'
     $eco = if ($naoWindows) { '"echo", "ok"' } else { '"hostname"' }
     $toml = @"
-vault = '$(Join-Path $dir 'vault')'
-data_dir = '$(Join-Path $dir 'dados')'
+vault = '$vault'
+data_dir = '$(Join-Path $homeDir 'dados')'
 
 [[command]]
 name = "Eco"
@@ -99,7 +115,7 @@ enabled = false
     if ($naoWindows) { & chmod 600 -- $cfg }
     Write-Output '== hud --check'
     $r = Invoke-Hud @('--check', '-c', $cfg)
-    if ($r.Code -ne 0) { Fail 'hud --check saiu com erro' $r.Out }
+    if (-not (Test-CheckOk $r)) { Fail "hud --check saiu com erro ($($r.Code))" $r.Out }
     Write-Output $r.Out.TrimEnd()
 
     Write-Output '== isolamento (modulos plantados)'
@@ -131,7 +147,7 @@ enabled = false
         $desc = ($vars.Keys | Sort-Object | ForEach-Object { "$_=$($vars[$_])" }) -join ' '
         Write-Output "   $desc"
         $r = Invoke-Hud @('--check', '-c', $cfg) $vars
-        if ($r.Code -ne 0) { Fail "hud --check saiu com erro com $desc" $r.Out }
+        if (-not (Test-CheckOk $r)) { Fail "hud --check saiu com erro ($($r.Code)) com $desc" $r.Out }
         # PYTHONVERBOSE=1 faria o Python listar cada import ("import ..."/"# ...").
         if ($r.Out -match '(?m)^(import |# )') { Fail "variavel PYTHON* respeitada ($desc)" $r.Out }
     }
@@ -164,3 +180,6 @@ enabled = false
 } finally {
     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
 }
+# Sucesso explicito: o "shell: pwsh" do GitHub Actions termina com exit $LASTEXITCODE,
+# e o ultimo comando nativo (o python do controle, que cai na armadilha) sai com 1.
+exit 0

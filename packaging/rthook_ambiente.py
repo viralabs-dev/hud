@@ -20,3 +20,26 @@ else:
 for _k in [k for k in os.environ if k.startswith("_PYI_")]:
     del os.environ[_k]
 del _orig
+
+# Locale: o Python comum, ao iniciar num locale "C"/"POSIX" (LANG e LC_* vazios,
+# ou um nome que o sistema não conhece) e sem LC_ALL, troca o LC_CTYPE por um
+# UTF-8 (PEP 538: C.UTF-8, C.utf8 ou UTF-8, o primeiro que existir) e exporta
+# LC_CTYPE. O bootloader do PyInstaller inicia o Python em modo isolado, que pula
+# essa etapa; sem ela o curses fica em ASCII e desenha bordas, "·" e acentos como
+# espaço. Isto repete a PEP 538 antes do hud.__main__ chamar setlocale(LC_ALL, "").
+if os.name == "posix" and not os.environ.get("LC_ALL"):
+    import locale as _locale
+
+    try:
+        _locale.setlocale(_locale.LC_CTYPE, "")
+    except _locale.Error:
+        pass
+    if _locale.setlocale(_locale.LC_CTYPE) in ("C", "POSIX"):
+        for _alvo in ("C.UTF-8", "C.utf8", "UTF-8"):
+            try:
+                _locale.setlocale(_locale.LC_CTYPE, _alvo)
+            except _locale.Error:
+                continue
+            os.environ["LC_CTYPE"] = _alvo
+            break
+    del _locale

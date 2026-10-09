@@ -32,6 +32,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # HUD_BIN (opcional): roda os testes contra outro executável, como o binário
 # autocontido (build/pyinstaller/dist/hud, ver scripts/release.sh). Sem ela, usa bin/hud.
 HUD_BIN = Path(os.environ.get("HUD_BIN") or ROOT / "bin" / "hud").resolve()
+UTF8_LOCALE = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
 ROWS, COLS = 40, 120
 WAIT = 10.0
 
@@ -242,8 +243,9 @@ class UiTest(unittest.TestCase):
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": str(cls.home),
             "USER": os.environ.get("USER", "teste"),
-            "LANG": "C.UTF-8",
-            "LC_ALL": "C.UTF-8",
+            # O macOS 14 não tem C.UTF-8 (setlocale recusa e o curses cai em ASCII).
+            "LANG": UTF8_LOCALE,
+            "LC_ALL": UTF8_LOCALE,
             "TERM": "xterm-256color",
             "TMPDIR": str(cls.tmp),
             "CLAUDE_CONFIG_DIR": str(cls.tmp / "claude-config"),

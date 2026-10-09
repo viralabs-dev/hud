@@ -113,7 +113,15 @@ function Invoke-Exe([string]$Exe, [string]$Argumentos) {
     $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
-    $p = [Diagnostics.Process]::Start($psi)
+    try {
+        $p = [Diagnostics.Process]::Start($psi)
+    } catch {
+        # Arquivo que nao e um executavel valido (ou bloqueado pelo antivirus): o
+        # Windows recusa ja na partida, com Win32Exception dentro da excecao.
+        $ex = $_.Exception
+        while ($ex.InnerException) { $ex = $ex.InnerException }
+        return [pscustomobject]@{ Code = -1; Out = $ex.Message.Trim() }
+    }
     $p.StandardInput.Close()
     $o = $p.StandardOutput.ReadToEndAsync()
     $e = $p.StandardError.ReadToEndAsync()
