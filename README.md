@@ -1,25 +1,48 @@
 # hud
 
 HUD de terminal numa tela só, sem abas: indicadores do sistema, painel de
-comandos permitidos, agenda, uso do plano Claude, entrada/saída de texto ligada ao
-Claude Code e ao Codex local, e o Vault do Obsidian ao vivo.
+comandos permitidos, agenda, uso do plano Claude e do Codex, entrada/saída de texto ligada ao
+Claude Code e ao Codex local, e o Vault do Obsidian ao vivo. O layout é
+customizável: cada painel vai onde você quiser, e dá para criar painéis próprios.
 
 Python 3.11+ e só a biblioteca padrão (curses, tomllib): nenhuma dependência.
 Instala com `pipx install ~/dev/hud` ou roda direto do repositório (ver *Rodar*).
 
-```
-╭ SISTEMA ─────────╮╭ VAULT · ao vivo ───────────────────────╮
-│ CPU MEM SWAP / │││ notas, quadros Kanban, em andamento,   │
-│ LOAD REDE TEMP   ││ recentes, conflitos de sync            │
-├ COMANDOS ────────┤├ SAÍDA ─────────────────────────────────┤
-│ F1–F10 / Alt+N   ││ resultado dos comandos, buscas, notas  │
-├ AGENDA ──────────┤│ e as respostas do Claude               │
-│ hoje, próximos   ││                                        │
-├ USO CLAUDE ──────┤│                                        │
-│ 5h  82% ██████▒▒ ││                                        │
-╰──────────────────╯╰────────────────────────────────────────╯
-╭ ENTRADA ─────────────────────────────────────────────────────╮
-```
+## Telas
+
+Execução real do HUD num pseudo-terminal (pty) de 120×40, com `TERM=xterm-256color` e teclas de verdade. Os PNGs e o GIF são quadros renderizados da gravação, não capturas de tela do desktop. Todos os dados são de demonstração: HOME, Vault, agenda, comandos e cache de uso sintéticos, e o Claude e o Codex são scripts falsos que respondem no formato real. Só os números do painel SISTEMA (CPU, memória, disco) são da máquina que gravou.
+
+**Revisão gravada:** `289d790`, em 2026-10-08. Para gravar de novo: `python3 scripts/record-screens.py` (o HUD continua sem dependências; só a renderização usa Pillow, num ambiente virtual temporário).
+
+![Tela inicial no modo notas: sistema, comandos, agenda, uso do Claude, Vault ao vivo e a saída.](docs/telas/01-notas.png)
+
+Tela inicial no modo notas: sistema, comandos, agenda, uso do Claude, Vault ao vivo e a saída.
+
+![Modo Claude (laranja): uma pergunta e a resposta do Claude falso.](docs/telas/02-claude.png)
+
+Modo Claude (laranja): uma pergunta e a resposta do Claude falso.
+
+![Modo Codex (cinza): a pergunta e a resposta chegando do Codex falso.](docs/telas/03-codex.png)
+
+Modo Codex (cinza): a pergunta e a resposta chegando do Codex falso.
+
+![/ajuda na saída.](docs/telas/04-ajuda.png)
+
+/ajuda na saída.
+
+![Saída rolada para cima com a roda do mouse.](docs/telas/05-rolagem.png)
+
+Saída rolada para cima com a roda do mouse.
+
+![/pasta com um projeto de exemplo no lugar do Vault.](docs/telas/06-pasta.png)
+
+/pasta com um projeto de exemplo no lugar do Vault.
+
+![Sessão inteira, animada: notas, Claude, Codex, ajuda, rolagem e /pasta.](docs/telas/hud-demo.gif)
+
+Sessão inteira, animada: notas, Claude, Codex, ajuda, rolagem e /pasta.
+
+A gravação crua fica em `docs/telas/hud-demo.cast` (asciinema v2), `hud-demo.pty.txt` e `hud-demo.metadata.json` (revisão, duração, teclas enviadas e sha256 do código).
 
 ## Rodar
 
@@ -83,7 +106,12 @@ e `pipx install --force ~/dev/hud`.
 | `/perfil leitura\|completo` | troca o perfil do agente do modo atual (abre conversa nova) |
 | `/comandos` | lista os comandos `/` do Claude Code; no modo Claude, `/qualquer` que o HUD não conhece vai para o Claude e `//nome` força |
 | `/novo` · `/parar` | nova conversa · interrompe a resposta |
+| `/custom lista` · `/custom nome` | lista as customizações de `custom/` · usa uma (lembrada) |
+| `/custom padrao` · `/custom salvar` | volta ao layout embutido · grava a proposta que um agente fez |
 | `/limpar` · `/ajuda` · `/sair` | |
+
+Os comandos `/` do HUD valem em qualquer modo da entrada (notas, Claude ou
+Codex); só os comandos `/` próprios do Claude Code são repassados ao Claude.
 
 A roda do mouse (ou PgUp/PgDn) rola a saída, ↑/↓ percorrem o histórico, Esc limpa a linha.
 Com o mouse ligado, selecione texto com Shift+arrastar.
@@ -114,6 +142,43 @@ Lido a cada 5 s, relendo só as notas que mudaram. Mostra os quadros com
 `sync-conflict` do Syncthing. Tarefas abertas com data no formato do Obsidian
 Tasks (`📅 2026-10-10`) ou do Kanban (`@{2026-10-10}`, hora `@@{15:00}`)
 aparecem na agenda com ◆ e são somente leitura.
+
+## Customização
+
+Cada customização é uma pasta `custom/<nome>/` na raiz do repositório, para ser
+compartilhada por commit/PR. O `layout.toml` diz em que coluna e em que ordem
+fica cada painel (`sistema`, `comandos`, `agenda`, `uso_claude`, `uso_codex`,
+`vault`, `saida`) e a altura de cada um; `[[painel]]` cria painéis próprios:
+
+| tipo | mostra |
+|---|---|
+| `texto` | um `.md`/`.txt` da própria pasta da customização |
+| `arquivo` | as últimas linhas de um arquivo (ex.: um log); segredos (`~/.ssh`, `.env`, chaves…) são recusados |
+| `comando` | a saída de um `argv` a cada intervalo, sem shell e com as regras dos comandos do painel |
+
+Vêm três modelos: `padrao` (a tela de sempre), `foco` (saída grande e lembretes)
+e `monitor` (três colunas, syslog e portas). `/custom lista` mostra todos;
+`/custom foco` usa; `/custom padrao` volta. Fora do HUD, `hud --custom-check
+<nome>` valida uma pasta.
+
+**Painel de comando de terceiros não roda sem você ver:** ao escolher uma
+customização com `comando`, o HUD mostra os argv e pede `s`; a confiança fica
+registrada pelo sha256 do `layout.toml` e volta a ser pedida se o arquivo mudar.
+Sem confiar, o layout é usado com esses painéis desligados.
+
+**Com o Claude ou o Codex:** a skill `hud-custom` (`skills/hud-custom/SKILL.md`)
+ensina os dois a montar customizações. Para instalar nos dois:
+
+```bash
+ln -s ~/dev/hud/skills/hud-custom ~/.claude/skills/hud-custom
+ln -s ~/dev/hud/skills/hud-custom ~/.codex/skills/hud-custom
+```
+
+Dentro do HUD peça, por exemplo, "deixe a saída maior e ponha o uso embaixo": o
+agente responde com a proposta (blocos `hud-custom`), sem gravar nada; você
+grava com `/custom salvar` e usa com `/custom <nome>`. Fora do HUD, o agente
+grava direto em `custom/<nome>/`. A pasta `custom/` vai para um repositório
+público: nada de credencial, token ou caminho pessoal num `layout.toml`.
 
 ## Claude Code e Codex
 
@@ -151,6 +216,11 @@ padrão (nunca como argumento). Sem MCP a pergunta também sai mais barata: num
 teste, um turno custou US$ 0,61 com MCP e US$ 0,12 sem.
 
 ## Uso do plano
+
+O painel USO CODEX, abaixo, faz o mesmo com o Codex: as janelas que ele informa
+(neste plano, só a semanal) vêm do `rate_limits` mais recente dos arquivos de
+sessão em `~/.codex/sessions`, aceitos só se forem seus; o HUD não lê
+`~/.codex/auth.json`.
 
 O painel USO CLAUDE mostra o que **resta** da janela de 5 horas e da semanal:
 percentual na frente e uma barra de 5 segmentos de 20% (▒ = segmento pela
