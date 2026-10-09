@@ -10,7 +10,6 @@ import hashlib
 import json
 import os
 import re
-import signal
 import stat
 import subprocess
 import threading
@@ -19,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import layout as lay
+from . import plataforma as plat
 from .config import ConfigError, check_private_file
 from .layout import Layout, LayoutError, NAME_RE, TEXT_FILE_RE
 from .runner import OUTPUT_CAP, safe_env
@@ -46,7 +46,7 @@ def custom_root(repo_hint: Path | None = None) -> Path:
     repo = Path(repo_hint) if repo_hint is not None else Path(__file__).resolve().parent.parent
     if (repo / "pyproject.toml").is_file():
         return repo / "custom"
-    return Path("~/.local/share/hud/custom").expanduser()
+    return plat.default_data_dir() / "custom"
 
 
 def _dir(root: Path, nome: str) -> Path:
@@ -61,7 +61,8 @@ def list_customs(root: Path) -> list[tuple[str, str, str | None]]:
         return []
     out = []
     for entry in sorted(os.scandir(root), key=lambda e: e.name):
-        if entry.name.startswith(".") or not (entry.is_dir() or entry.is_symlink()):
+        if entry.name.startswith(".") or not (entry.is_dir() or entry.is_symlink()
+                                              or plat.is_link(entry.path)):
             continue
         try:
             out.append((entry.name, load_custom(root, entry.name).descricao, None))
@@ -85,7 +86,7 @@ def _write_private(path: Path, text: str) -> None:
         tmp.unlink()
     except FileNotFoundError:
         pass
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    fd = plat.open_nofollow(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | plat.O_CLOEXEC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(text)
     os.replace(tmp, path)
@@ -99,7 +100,7 @@ class Trust:
 
     def _read(self) -> dict[str, str]:
         try:
-            if self.path.is_symlink():
+            if plat.is_link(self.path):
                 return {}
             check_private_file(self.path)
             data = json.loads(lay.read_small(self.path).decode("utf-8"))
@@ -210,11 +211,12 @@ def _write_shared(path: Path, data: bytes) -> None:
         tmp.unlink()
     except FileNotFoundError:
         pass
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o644)
+    fd = plat.open_nofollow(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | plat.O_CLOEXEC, 0o644)
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
-            os.fchmod(fh.fileno(), 0o644)  # 644 mesmo com umask 077: é para compartilhar
+            if not plat.WINDOWS:  # no Windows o modo só liga e desliga somente-leitura
+                os.fchmod(fh.fileno(), 0o644)  # 644 mesmo com umask 077: é para compartilhar
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
@@ -239,7 +241,7 @@ def save_proposals(root: Path, proposals: list[Proposal],
             raise CustomError(f"{p.arquivo} passa de 64 KB")
         files[p.arquivo] = data
     exists = d.exists() or d.is_symlink()
-    if d.is_symlink():
+    if plat.is_link(d):
         raise CustomError(f"{d} é link simbólico")
     if exists and not d.is_dir():
         raise CustomError(f"{d} existe e não é pasta")
@@ -250,11 +252,11 @@ def save_proposals(root: Path, proposals: list[Proposal],
     if exists and not sobrescrever:
         raise AlreadyExists(f"custom/{nome} já existe")
     for arq in files:
-        if (d / arq).is_symlink():
+        if plat.is_link(d / arq):
             raise CustomError(f"{arq} é link simbólico")
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
-    if root.is_symlink() or not root.is_dir():
+    if plat.is_link(root) or not root.is_dir():
         raise CustomError(f"{root} não é uma pasta")
     if not exists:
         d.mkdir()
@@ -279,7 +281,7 @@ def _ago(sec: float) -> str:
 
 
 def _lines(raw: bytes, limit: int) -> list[str]:
-    text = clean(raw.decode("utf-8", "replace")).rstrip("\n")
+    text = clean(plat.decode_output(raw)).rstrip("\n")
     lines = text.split("\n") if text else []
     return lines[-limit:]
 
@@ -330,10 +332,7 @@ class PanelFeed:
         with self._lock:
             procs = [s.proc for s in self._st.values() if s.proc is not None]
         for proc in procs:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
+            plat.kill_tree(proc)
         if self._thread is not None:
             self._thread.join(timeout=2)
 
@@ -391,7 +390,7 @@ class PanelFeed:
 
     def _open(self, path: str):
         """Abre só arquivo comum, sem seguir link no último componente e sem travar em FIFO."""
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        fd = plat.open_nofollow(path, os.O_RDONLY | plat.O_NONBLOCK | plat.O_CLOEXEC)
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
             os.close(fd)
@@ -458,20 +457,17 @@ class PanelFeed:
             proc = subprocess.Popen(
                 list(p.argv), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, env=safe_env(), cwd=os.path.expanduser("~"),
-                start_new_session=True, close_fds=True, shell=False,
+                close_fds=True, shell=False, **plat.popen_group_kwargs(),
             )
             with self._lock:
                 self._st[pid].proc = proc
             if self._stop.is_set():
-                os.killpg(proc.pid, signal.SIGKILL)
+                plat.kill_tree(proc)
 
             def kill() -> None:
                 nonlocal timed_out
                 timed_out = True
-                try:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+                plat.kill_tree(proc)
 
             timer = threading.Timer(p.timeout, kill)
             timer.daemon = True

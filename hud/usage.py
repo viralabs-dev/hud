@@ -2,8 +2,9 @@
 
 Duas fontes, sem nunca tocar no token OAuth:
 - o cache que o plugin claude-usage-monitor do statusline grava em
-  /tmp/claude-sl-usage-<sha1(config_home)[:12]>.json (só se for seu e ninguém
-  mais puder escrevê-lo; os números são validados);
+  <tempfile.gettempdir()>/claude-sl-usage-<sha1(config_home)[:12]>.json (só se
+  for seu e ninguém mais puder escrevê-lo — no Windows, se estiver no seu
+  perfil e não for link; os números são validados);
 - os eventos `rate_limit_event` das conversas que o próprio HUD abre.
 Vale o dado mais recente.
 
@@ -20,6 +21,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from hud import plataforma as plat
 from hud.text import clean_line
 
 
@@ -107,12 +109,12 @@ class UsageTracker:
     def poll(self) -> bool:
         """Relê o cache se mudou. Devolve True quando o dado mudou."""
         try:
-            fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW)
+            fd = plat.open_nofollow(self.path, os.O_RDONLY)
         except OSError:
             return False
         with os.fdopen(fd, encoding="utf-8") as f:
             st = os.fstat(f.fileno())
-            if (st.st_uid != os.getuid() or st.st_mode & stat.S_IWOTH
+            if (plat.foreign(st, self.path)
                     or not stat.S_ISREG(st.st_mode) or st.st_size > 4096
                     or st.st_mtime == self._mtime):
                 return False
@@ -294,13 +296,12 @@ def latest_rollout(sessions_dir: Path, days: int = CODEX_DAYS) -> Path | None:
 def read_codex_rollout(path: Path, tail: int = CODEX_TAIL) -> CodexUsage | None:
     """Último `rate_limits` válido nos últimos `tail` bytes de um rollout seguro."""
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = plat.open_nofollow(path, os.O_RDONLY)
     except OSError:
         return None
     with os.fdopen(fd, "rb") as f:
         st = os.fstat(f.fileno())
-        if (st.st_uid != os.getuid() or st.st_mode & stat.S_IWOTH
-                or not stat.S_ISREG(st.st_mode)):
+        if plat.foreign(st, path) or not stat.S_ISREG(st.st_mode):
             return None
         start = max(0, st.st_size - tail)
         f.seek(start)

@@ -2,11 +2,11 @@
 
 import os
 import queue
-import signal
 import subprocess
 import threading
 import time
 
+from . import plataforma as plat
 from .config import SAFE_PATH, Command
 from .text import clean
 
@@ -14,9 +14,12 @@ OUTPUT_CAP = 256 * 1024
 
 
 def safe_env() -> dict[str, str]:
-    """Ambiente mínimo: nada de LD_PRELOAD, PYTHONPATH ou PATH do usuário."""
+    """Ambiente mínimo: nada de LD_PRELOAD, PYTHONPATH ou PATH do usuário.
+
+    No Windows entram também SystemRoot, TEMP, USERPROFILE, APPDATA, PATHEXT,
+    COMSPEC e afins: sem eles muitos programas nem iniciam."""
     lang = os.environ.get("LANG", "C.UTF-8")
-    return {
+    env = {
         "PATH": SAFE_PATH,
         "HOME": os.path.expanduser("~"),
         "USER": os.environ.get("USER", ""),
@@ -29,6 +32,10 @@ def safe_env() -> dict[str, str]:
         "PAGER": "cat",
         "COLUMNS": "200",
     }
+    if plat.WINDOWS:
+        env.update(plat.windows_base_env())
+        env["PATH"] = SAFE_PATH
+    return env
 
 
 class Runner:
@@ -60,16 +67,13 @@ class Runner:
                 cmd.argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, env=safe_env(),
                 cwd=cmd.cwd or os.path.expanduser("~"),
-                start_new_session=True, close_fds=True, shell=False,
+                close_fds=True, shell=False, **plat.popen_group_kwargs(),
             )
 
             def kill() -> None:
                 nonlocal timed_out
                 timed_out = True
-                try:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+                plat.kill_tree(proc)
 
             timer = threading.Timer(cmd.timeout, kill)
             timer.start()
@@ -84,7 +88,7 @@ class Runner:
             finally:
                 timer.cancel()
                 proc.stdout.close()
-            text = clean(buf.decode("utf-8", "replace")).rstrip("\n")
+            text = clean(plat.decode_output(bytes(buf))).rstrip("\n")
             lines = text.split("\n") if text else []
             if len(lines) > cmd.max_lines:
                 lines = lines[: cmd.max_lines]

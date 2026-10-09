@@ -21,6 +21,7 @@ from typing import Callable
 from pathlib import Path
 
 from . import agenda as ag
+from . import plataforma as plat
 from .config import Command, Config, ConfigError, remember_folder, validate_folder
 from .metrics import Metrics, human_bytes, human_duration
 from . import custom as cu
@@ -36,10 +37,13 @@ SPARK = "▁▂▃▄▅▆▇█"
 SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 MIN_W, MIN_H = 80, 24
 MAX_INPUT = 500
-WHEEL_UP = curses.BUTTON4_PRESSED
+# PDCurses (windows-curses) pode não ter as constantes da roda: sem elas, sem roda.
+WHEEL_UP = getattr(curses, "BUTTON4_PRESSED", 0)
 WHEEL_DOWN = getattr(curses, "BUTTON5_PRESSED", 0x200000)
 WHEEL_STEP = 3
 MODE_KEYS = {"1": "notas", "2": "claude", "3": "codex"}  # Alt+1/2/3
+# PDCurses manda Alt+N como uma tecla só (ALT_1...); o ncurses manda Esc + N.
+ALT_KEYS = {getattr(curses, f"ALT_{n}"): m for n, m in MODE_KEYS.items() if hasattr(curses, f"ALT_{n}")}
 
 HELP = """\
 Teclas
@@ -139,13 +143,19 @@ class Hud:
     # ── ciclo ────────────────────────────────────────────────────────────
     def run(self, scr) -> None:
         self.scr = scr
-        curses.curs_set(1)
+        try:
+            curses.curs_set(1)
+        except curses.error:  # terminal sem cursor configurável
+            pass
         scr.keypad(True)
         scr.timeout(200)
         # Só a roda importa. Com o mouse ligado o terminal passa os cliques
         # para o HUD; para selecionar texto, Shift+arrastar.
-        curses.mousemask(WHEEL_UP | WHEEL_DOWN)
-        curses.mouseinterval(0)
+        try:
+            curses.mousemask(WHEEL_UP | WHEEL_DOWN)
+            curses.mouseinterval(0)
+        except (curses.error, AttributeError):  # PDCurses/terminal sem mouse
+            pass
         self._colors()
         self.vault.start()
         self.say("HUD pronto. Digite /ajuda para ver tudo o que a entrada aceita.", "dim")
@@ -182,6 +192,11 @@ class Hud:
                     ch = scr.get_wch()
                 except curses.error:
                     continue
+                if ch == curses.KEY_RESIZE and plat.WINDOWS:
+                    try:  # PDCurses só atualiza o tamanho da tela com resize_term
+                        curses.resize_term(0, 0)
+                    except (curses.error, AttributeError):
+                        pass
                 self.key(ch)
                 self.draw()
         except KeyboardInterrupt:
@@ -252,7 +267,11 @@ class Hud:
         self.c: dict[str, int] = {}
         try:
             curses.start_color()
-            curses.use_default_colors()
+            bg = -1
+            try:
+                curses.use_default_colors()
+            except curses.error:  # sem fundo padrão do terminal: fundo preto
+                bg = curses.COLOR_BLACK
             pairs = {"accent": curses.COLOR_CYAN, "ok": curses.COLOR_GREEN,
                      "warn": curses.COLOR_YELLOW, "crit": curses.COLOR_RED,
                      "mag": curses.COLOR_MAGENTA, "blue": curses.COLOR_BLUE}
@@ -262,7 +281,7 @@ class Hud:
             pairs["codex"] = 248 if rich else curses.COLOR_WHITE
             pairs["codex_dim"] = 242 if rich else curses.COLOR_WHITE
             for i, (k, col) in enumerate(pairs.items(), 1):
-                curses.init_pair(i, col, -1)
+                curses.init_pair(i, col if col < curses.COLORS else curses.COLOR_WHITE, bg)
                 self.c[k] = curses.color_pair(i)
         except curses.error:
             pass
@@ -753,6 +772,9 @@ class Hud:
                 return
             self.mode = modes[(modes.index(self.mode) + 1) % len(modes)]
             return
+        if isinstance(ch, int) and ch in ALT_KEYS:
+            self.set_mode(ALT_KEYS[ch])
+            return
         if isinstance(ch, int):
             if curses.KEY_F1 <= ch <= curses.KEY_F0 + 10:
                 self.run_slot(ch - curses.KEY_F1)
@@ -1071,7 +1093,10 @@ class Hud:
     def note(self, text: str) -> None:
         stamp = time.strftime("%Y-%m-%d %H:%M")
         try:
-            fd = os.open(self.notes_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+            why = plat.private_location_error(self.notes_path)
+            if why:
+                raise PermissionError(why)
+            fd = plat.open_nofollow(self.notes_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
             with os.fdopen(fd, "a", encoding="utf-8") as f:
                 f.write(f"- {stamp} {text}\n")
         except OSError as e:
@@ -1082,6 +1107,8 @@ class Hud:
     def show_notes(self, arg: str) -> None:
         n = int(arg) if arg.isdigit() else 15
         try:
+            if plat.private_location_error(self.notes_path) or (plat.WINDOWS and plat.is_link(self.notes_path)):
+                raise FileNotFoundError(self.notes_path)  # Windows: fora do perfil ou link
             lines = self.notes_path.read_text(encoding="utf-8").splitlines()
         except FileNotFoundError:
             lines = []

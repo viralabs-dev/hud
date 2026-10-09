@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import plataforma as plat
 from .agenda import Item
 from .text import clean_line, strip_markdown
 
@@ -174,6 +175,8 @@ class VaultWatcher(threading.Thread):
         n = 0
         for dirpath, dirs, files in os.walk(root, followlinks=False):
             dirs[:] = [d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS]
+            if plat.WINDOWS:  # os.walk entra em junções; o HUD não segue link nenhum
+                dirs[:] = [d for d in dirs if not plat.is_link(os.path.join(dirpath, d))]
             for f in files:
                 if f.lower().endswith(NOTE_EXT) and not f.startswith("."):
                     n += 1
@@ -198,7 +201,7 @@ class VaultWatcher(threading.Thread):
                     st = os.lstat(path)
                 except OSError:
                     continue
-                if not os.path.isfile(path) or os.path.islink(path):
+                if not os.path.isfile(path) or os.path.islink(path) or plat.is_reparse(st):
                     continue
                 rel = os.path.relpath(path, root)
                 seen.add(rel)
@@ -245,7 +248,7 @@ class VaultWatcher(threading.Thread):
         root = str(self.root)
         hits: list[tuple[str, int, str]] = []
         for path in self.iter_notes():
-            if os.path.islink(path):
+            if os.path.islink(path) or (plat.WINDOWS and plat.is_link(path)):
                 continue
             rel = os.path.relpath(path, root)
             if needle in rel.lower():

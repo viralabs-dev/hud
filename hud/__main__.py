@@ -5,23 +5,42 @@ import sys
 from pathlib import Path
 
 from . import __version__, config
+from . import plataforma as plat
+
+CURSES_MISSING = (
+    "hud: falta o módulo curses. No Windows, rodando do código-fonte, instale o "
+    "windows-curses (python -m pip install windows-curses); o binário do HUD já o traz."
+)
+
+
+def curses_available() -> bool:
+    try:
+        import curses  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 def main() -> int:
     p = argparse.ArgumentParser(prog="hud", description="HUD de terminal, uma tela só.")
-    p.add_argument("-c", "--config", type=Path, help="arquivo TOML (padrão: ~/.config/hud/config.toml)")
+    p.add_argument("-c", "--config", type=Path, help=f"arquivo TOML (padrão: {config.DEFAULT_CONFIG_PATH})")
     p.add_argument("-p", "--pasta", help="pasta local para ler ao vivo no lugar do Vault (só nesta execução)")
     p.add_argument("--check", action="store_true", help="valida a configuração e sai")
     p.add_argument("--custom-check", metavar="NOME", help="valida custom/NOME e sai")
     p.add_argument("--version", action="version", version=f"hud {__version__}")
     args = p.parse_args()
 
-    if os.geteuid() == 0:
+    if plat.is_root():
         print("hud: não rode como root.", file=sys.stderr)
         return 2
     os.umask(0o077)
-    locale.setlocale(locale.LC_ALL, "")
+    try:
+        locale.setlocale(locale.LC_ALL, "")
+    except locale.Error:
+        pass
     cfg = config.load(args.config, args.pasta)
+    if plat.is_admin():  # Windows: elevado não bloqueia, só avisa
+        cfg.warnings.append("rodando como administrador: prefira uma sessão comum")
     if args.custom_check is not None:
         return custom_check(args.custom_check, cfg.custom_dir)
 
@@ -32,7 +51,8 @@ def main() -> int:
             print(f"  [{c.key}] {c.name}: {' '.join(c.argv)} · {c.timeout:.0f}s{flag}")
         if cfg.claude:
             c = cfg.claude
-            print(f"claude: {c.executable} · cwd {c.cwd} · ferramentas {', '.join(c.tools)}"
+            via = f" (via {' '.join(c.launch)})" if c.launch else ""
+            print(f"claude: {c.executable}{via} · cwd {c.cwd} · ferramentas {', '.join(c.tools)}"
                   f" · lê só {', '.join(c.read_dirs) or 'nada'}"
                   f" · até US$ {c.max_budget_usd:.2f} por pergunta")
             print(f"  perfil inicial: {c.profile} (completo usa permission-mode {c.full_permission_mode})")
@@ -40,7 +60,8 @@ def main() -> int:
             print("claude: desligado")
         if cfg.codex:
             x = cfg.codex
-            print(f"codex: {x.executable} · cwd {x.cwd} · perfil inicial {x.profile}"
+            via = f" (via {' '.join(x.launch)})" if x.launch else ""
+            print(f"codex: {x.executable}{via} · cwd {x.cwd} · perfil inicial {x.profile}"
                   f" ({'sandbox read-only' if x.profile == 'leitura' else 'config do ~/.codex'})")
         else:
             print("codex: desligado")
@@ -49,6 +70,9 @@ def main() -> int:
         return 1 if cfg.warnings else 0
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         print("hud: precisa de um terminal interativo.", file=sys.stderr)
+        return 2
+    if not curses_available():
+        print(CURSES_MISSING, file=sys.stderr)
         return 2
 
     from .ui import main as run

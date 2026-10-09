@@ -11,6 +11,7 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import plataforma as plat
 from .text import clean_line
 
 LINE = re.compile(r"^- \[([ xX])\] (\d{4}-\d{2}-\d{2})(?: (\d{2}:\d{2}))? (.+)$")
@@ -109,6 +110,11 @@ class Agenda:
 
     def load(self) -> None:
         self.items = []
+        # Windows: st_uid e chmod não dizem nada; a agenda só vale dentro do seu perfil.
+        why = plat.private_location_error(self.path)
+        if why or (plat.WINDOWS and plat.is_link(self.path)):
+            self.error = why or f"{self.path} é link simbólico ou junção"
+            return
         try:
             raw = self.path.read_text(encoding="utf-8")
         except FileNotFoundError:
@@ -127,6 +133,9 @@ class Agenda:
             self.items.append(Item(d, m.group(3), clean_line(m.group(4)), m.group(1) != " "))
 
     def save(self) -> None:
+        why = plat.private_location_error(self.path)
+        if why:
+            raise PermissionError(why)
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         body = "# Agenda (HUD)\n\n" + "\n".join(
             i.to_line() for i in sorted(self.items, key=lambda i: i.sort_key)) + "\n"

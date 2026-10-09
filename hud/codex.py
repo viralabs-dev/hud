@@ -23,11 +23,12 @@ class CodexConfig:
     timeout: float = 600.0
     profile: str = "leitura"
     follow_folder: bool = True  # cwd/leitura acompanham a pasta do HUD
+    launch: tuple[str, ...] = ()  # Windows, shim .cmd do npm: (node.exe, script.js)
 
 
 def build_argv(cfg: CodexConfig, thread_id: str = "", profile: str | None = None) -> list[str]:
     profile = profile or cfg.profile
-    argv = [cfg.executable, "exec"]
+    argv = [*(cfg.launch or (cfg.executable,)), "exec"]
     if thread_id:
         argv += ["resume", thread_id]
     argv += ["--json", "--skip-git-repo-check"]
