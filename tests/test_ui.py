@@ -24,7 +24,9 @@ from pathlib import Path
 from tests.vt import Screen
 
 ROOT = Path(__file__).resolve().parent.parent
-HUD_BIN = ROOT / "bin" / "hud"
+# HUD_BIN (opcional): roda os testes contra outro executável, como o binário
+# autocontido (build/pyinstaller/dist/hud, ver scripts/release.sh). Sem ela, usa bin/hud.
+HUD_BIN = Path(os.environ.get("HUD_BIN") or ROOT / "bin" / "hud").resolve()
 ROWS, COLS = 40, 120
 WAIT = 10.0
 

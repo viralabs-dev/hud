@@ -1,0 +1,57 @@
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.13']
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python3 -m unittest discover -s tests -t .
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: bash -n install.sh scripts/*.sh packaging/*.sh
+      - run: bash scripts/test-installer.sh
+
+  binary:
+    # Runner antigo de propósito: o binário herda o glibc mínimo do sistema de
+    # build (Ubuntu 22.04 → glibc 2.35).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: PyInstaller num venv descartável (versões e hashes fixos)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/build-venv"
+          "$RUNNER_TEMP/build-venv/bin/pip" install --require-hashes -r packaging/requirements-build.txt
+      - name: Monta o binário (scripts/release.sh, com smoke e teste de isolamento)
+        run: |
+          version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' hud/__init__.py)"
+          PYTHON="$RUNNER_TEMP/build-venv/bin/python" bash scripts/release.sh "v$version"
+      - name: Smoke fora do repositório
+        run: |
+          cd "$RUNNER_TEMP"
+          "$GITHUB_WORKSPACE/build/pyinstaller/dist/hud" --version
+          bash "$GITHUB_WORKSPACE/packaging/smoke.sh" "$GITHUB_WORKSPACE/build/pyinstaller/dist/hud"
+      - name: Testes da tela contra o binário (pty, TERM=xterm-256color)
+        run: HUD_BIN="$PWD/build/pyinstaller/dist/hud" python3 -m unittest tests.test_ui -v
+      - name: Instalador com o pacote real
+        run: bash scripts/test-installer.sh dist/hud_linux_amd64.tar.gz

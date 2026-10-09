@@ -7,3 +7,5 @@ __pycache__/
 build/
 dist/
 .claude/
+# gerados pelo PyInstaller quando chamado sem packaging/hud.spec
+/*.spec
