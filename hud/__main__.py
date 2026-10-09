@@ -12,6 +12,7 @@ def main() -> int:
     p.add_argument("-c", "--config", type=Path, help="arquivo TOML (padrão: ~/.config/hud/config.toml)")
     p.add_argument("-p", "--pasta", help="pasta local para ler ao vivo no lugar do Vault (só nesta execução)")
     p.add_argument("--check", action="store_true", help="valida a configuração e sai")
+    p.add_argument("--custom-check", metavar="NOME", help="valida custom/NOME e sai")
     p.add_argument("--version", action="version", version=f"hud {__version__}")
     args = p.parse_args()
 
@@ -20,6 +21,8 @@ def main() -> int:
         return 2
     os.umask(0o077)
     locale.setlocale(locale.LC_ALL, "")
+    if args.custom_check is not None:
+        return custom_check(args.custom_check)
     cfg = config.load(args.config, args.pasta)
 
     if args.check:
@@ -50,6 +53,36 @@ def main() -> int:
 
     from .ui import main as run
     run(cfg)
+    return 0
+
+
+def custom_check(nome: str) -> int:
+    from . import custom
+    from .layout import LayoutError
+
+    root = custom.custom_root()
+    try:
+        lay = custom.load_custom(root, nome)
+    except (LayoutError, OSError) as e:
+        print(f"erro: custom/{nome}: {e}", file=sys.stderr)
+        return 1
+    print(f"OK: {lay.nome} ({root / nome})")
+    if lay.descricao:
+        print(f"  {lay.descricao}")
+    cols = " | ".join(f"{c.largura:g}%" if c.largura is not None else "resto" for c in lay.colunas)
+    print(f"colunas: {len(lay.colunas)} ({cols})")
+    for i, c in enumerate(lay.colunas, 1):
+        print(f"  coluna {i}: {', '.join(s.id for s in c.slots)}")
+    proprios = [p for p in lay.paineis.values() if p.id in lay.ids()]
+    print(f"painéis próprios: {', '.join(f'{p.id} ({p.tipo})' for p in proprios) or 'nenhum'}")
+    cmds = custom.needs_trust(lay)
+    print(f"comandos: {len(cmds)}")
+    for argv in cmds:
+        print(f"  {' '.join(argv)}")
+    if cmds:
+        print("  (rodam só depois de confiar com /custom no HUD)")
+    for w in lay.avisos:
+        print(f"aviso: {w}")
     return 0
 
 
