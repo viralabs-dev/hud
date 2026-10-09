@@ -1,0 +1,78 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python3 -m unittest discover -s tests -t .
+      - run: bash -n install.sh scripts/*.sh packaging/*.sh
+      - run: bash scripts/test-installer.sh
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # Ubuntu 22.04 nos dois: glibc mínimo 2.35.
+          - runner: ubuntu-22.04
+            arch: amd64
+          - runner: ubuntu-22.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: PyInstaller num venv descartável (versões e hashes fixos)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/build-venv"
+          "$RUNNER_TEMP/build-venv/bin/pip" install --require-hashes -r packaging/requirements-build.txt
+      - name: Monta o binário (a tag precisa bater com hud/__init__.py)
+        run: PYTHON="$RUNNER_TEMP/build-venv/bin/python" bash scripts/release.sh "$GITHUB_REF_NAME"
+      - name: Testes da tela contra o binário
+        run: HUD_BIN="$PWD/build/pyinstaller/dist/hud" python3 -m unittest tests.test_ui -v
+      - name: Instalador com o pacote real
+        run: bash scripts/test-installer.sh "dist/hud_linux_${{ matrix.arch }}.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hud_linux_${{ matrix.arch }}
+          path: dist/hud_linux_${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hud_linux_*
+          merge-multiple: true
+          path: dist
+      - name: checksums.txt único
+        run: |
+          cd dist
+          sha256sum hud_linux_amd64.tar.gz hud_linux_arm64.tar.gz > checksums.txt
+          cat checksums.txt
+      - run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/checksums.txt --generate-notes --verify-tag
+        env:
+          GH_TOKEN: ${{ github.token }}

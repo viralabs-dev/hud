@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Smoke do binário autocontido, fora do repositório e numa pasta temporária:
+#   1. hud --version
+#   2. hud --check -c <config 600> (Claude e Codex desligados, sai com 0)
+#   3. isolamento: módulos plantados (re, json, curses, os, sitecustomize,
+#      encodings, hud...) no diretório atual e em PYTHONPATH/PYTHONHOME/
+#      PYTHONSTARTUP não podem ser carregados. Se algum for, ele grava uma
+#      marca e o teste falha.
+# Uso: packaging/smoke.sh caminho/do/hud
+set -euo pipefail
+
+bin="$(readlink -f "${1:?uso: packaging/smoke.sh caminho/do/hud}")"
+[[ -x "$bin" ]] || { echo "Não executável: $bin" >&2; exit 1; }
+dir="$(mktemp -d)"
+trap 'rm -rf -- "$dir"' EXIT
+chmod 700 "$dir"
+mark="$dir/MARCA"
+mkdir -p "$dir/home" "$dir/vault"
+
+echo "== hud --version"
+(cd "$dir" && env -i PATH=/usr/bin:/bin HOME="$dir/home" "$bin" --version)
+
+cfg="$dir/config.toml"
+cat > "$cfg" <<EOF
+vault = "$dir/vault"
+data_dir = "$dir/dados"
+
+[[command]]
+name = "Eco"
+argv = ["echo", "ok"]
+
+[claude]
+enabled = false
+
+[codex]
+enabled = false
+EOF
+chmod 600 "$cfg"
+echo "== hud --check"
+(cd "$dir" && env -i PATH=/usr/bin:/bin HOME="$dir/home" "$bin" --check -c "$cfg")
+
+echo "== isolamento (módulos plantados)"
+for mod in re json curses os sys locale argparse pathlib tomllib subprocess threading \
+           sitecustomize usercustomize; do
+  printf 'open("%s", "a").write("%s carregado\\n")\nraise SystemExit("PLANTADO: %s")\n' \
+    "$mark" "$mod" "$mod" > "$dir/$mod.py"
+done
+mkdir -p "$dir/hud" "$dir/encodings" "$dir/lib"
+cp "$dir/re.py" "$dir/hud/__init__.py"
+cp "$dir/re.py" "$dir/hud/__main__.py"
+cp "$dir/re.py" "$dir/encodings/__init__.py"
+for v in 3.11 3.12 3.13 3.14; do mkdir -p "$dir/lib/python$v"; cp "$dir/re.py" "$dir/lib/python$v/os.py"; done
+printf 'open("%s", "a").write("PYTHONSTARTUP carregado\\n")\n' "$mark" > "$dir/startup.py"
+
+for vars in \
+  "PYTHONPATH=$dir" \
+  "PYTHONHOME=$dir" \
+  "PYTHONPATH=$dir PYTHONHOME=$dir PYTHONSTARTUP=$dir/startup.py PYTHONINSPECT=1 PYTHONUSERBASE=$dir PYTHONSAFEPATH=0" \
+  "PYTHONVERBOSE=1 PYTHONWARNINGS=error PYTHONDEBUG=1"; do
+  echo "   $vars"
+  # shellcheck disable=SC2086  # vars é uma lista de VAR=valor sem espaços nos valores
+  out="$(cd "$dir" && env -i PATH=/usr/bin:/bin HOME="$dir/home" $vars "$bin" --check -c "$cfg" 2>&1)" || {
+    echo "$out" >&2; echo "FALHOU: hud --check saiu com erro com $vars" >&2; exit 1; }
+  # PYTHONVERBOSE=1 faria o Python listar cada import ("import ..."/"# ...").
+  if grep -Eq '^(import |# )' <<<"$out"; then
+    echo "$out" >&2; echo "FALHOU: variável PYTHON* respeitada ($vars)" >&2; exit 1
+  fi
+done
+if [[ -e "$mark" ]]; then
+  cat "$mark" >&2; echo 'FALHOU: módulo plantado foi carregado.' >&2; exit 1
+fi
+echo "   nenhum módulo plantado foi carregado"
+
+# Controle: prova que a armadilha funciona num Python comum sem -I.
+if command -v python3 >/dev/null; then
+  mkdir "$dir/controle"; cp "$dir/json.py" "$dir/controle/json.py"
+  (cd / && PYTHONPATH="$dir/controle" python3 -c 'import json' 2>/dev/null) || true
+  if [[ -e "$mark" ]]; then
+    echo "   controle: python3 sem -I carregou o json plantado (armadilha válida)"
+  else
+    echo 'FALHOU: o controle não carregou o módulo plantado; o teste não prova nada.' >&2; exit 1
+  fi
+fi
+echo "smoke ok"
