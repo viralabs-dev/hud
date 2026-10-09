@@ -283,6 +283,7 @@ hud                        # precisa de 80×24 ou mais
 hud --check                # mostra a configuração e os comandos resolvidos
 hud --pasta ~/dev/projeto  # lê outra pasta no lugar do Vault, só nesta execução
 hud --custom-check foco    # valida uma customização
+hud --instalar-skill       # instala a skill hud-custom no Claude Code e no Codex
 ```
 
 O binário, o `bin/hud` e o pipx ignoram `PYTHONPATH`, o site do usuário e o
