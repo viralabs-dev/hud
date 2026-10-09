@@ -1,0 +1,9 @@
+#!/bin/sh
+# Script de entrada da instalação (pipx/pip). Fica em <venv>/bin/hud e roda o
+# Python do próprio venv em modo isolado (-I): ignora PYTHONPATH e as outras
+# PYTHON*, o site do usuário e o diretório atual, então nenhum módulo plantado é
+# carregado, nem durante a inicialização do interpretador. O script que o pip
+# gera para [project.scripts] não passa -I, por isso este substitui aquele.
+# Para desenvolvimento, use bin/hud.
+here="$(dirname "$(readlink -f "$0")")"
+exec "$here/python" -I -m hud "$@"

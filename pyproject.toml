@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hud"
+description = "HUD de terminal numa tela só: sistema, comandos permitidos, agenda, Vault, Claude Code e Codex."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+dynamic = ["version"]
+classifiers = [
+    "Environment :: Console :: Curses",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+]
+
+# Sem [project.scripts]: o script que o pip gera para um ponto de entrada roda o
+# Python do venv sem -I, e um PYTHONPATH apontando para módulos plantados seria
+# carregado antes de qualquer código do HUD (já no sitecustomize). O comando
+# `hud` instalado é scripts/hud, que roda `<venv>/bin/python -I -m hud`
+# (hud/__main__.py → main()). Ver "Rodar" no README.
+
+[tool.setuptools]
+packages = ["hud"]
+script-files = ["scripts/hud"]
+
+[tool.setuptools.dynamic]
+version = { attr = "hud.__version__" }

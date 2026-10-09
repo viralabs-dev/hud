@@ -22,12 +22,48 @@ Python 3.11+ e só a biblioteca padrão (curses, tomllib). Nada para instalar.
 
 ## Rodar
 
+Instalado com o [pipx](https://pipx.pypa.io/) (sem dependências; põe `hud` em
+`~/.local/bin`):
+
 ```bash
-bin/hud              # precisa de 80×24 ou mais
-bin/hud --check      # mostra a configuração e os comandos resolvidos
-bin/hud --pasta ~/dev/projeto   # lê outra pasta no lugar do Vault, só nesta execução
-ln -s ~/dev/hud/bin/hud ~/.local/bin/hud   # opcional, para chamar de qualquer lugar
+pipx install ~/dev/hud     # instala uma cópia do repositório
+hud                        # precisa de 80×24 ou mais
+hud --check                # mostra a configuração e os comandos resolvidos
+hud --pasta ~/dev/projeto  # lê outra pasta no lugar do Vault, só nesta execução
+pipx install --force ~/dev/hud   # atualiza depois de mexer no repositório
+pipx reinstall hud               # idem, a partir do mesmo caminho
+pipx uninstall hud
 ```
+
+A instalação é uma cópia: mudanças no repositório só valem depois do
+`--force`/`reinstall`. Para desenvolvimento, rode direto do repositório, sem
+instalar:
+
+```bash
+bin/hud              # mesmas opções: --check, --pasta, -c
+```
+
+Isolamento: os dois caminhos rodam o Python com `-I`, que ignora `PYTHONPATH`,
+o site do usuário e o diretório atual, então um `json.py` ou `curses.py`
+plantado não é carregado. O `bin/hud` faz isso direto; na instalação, o comando
+`hud` é o `scripts/hud`, que roda `<venv>/bin/python -I -m hud`. Por isso o
+`pyproject.toml` não usa `[project.scripts]`: o script que o pip gera para um
+ponto de entrada roda o Python sem `-I`, e um `PYTHONPATH` com módulos plantados
+seria carregado antes de qualquer código do HUD.
+
+Para trocar o link antigo `~/.local/bin/hud → ~/dev/hud/bin/hud` pela
+instalação do pipx, apague o link antes, porque o pipx põe o binário no mesmo
+lugar e não sobrescreve um arquivo que não é dele:
+
+```bash
+rm ~/.local/bin/hud        # só o link; o repositório fica
+pipx install ~/dev/hud
+hud --version
+```
+
+Se instalou sem apagar o link, o pipx avisa `File exists at ~/.local/bin/hud …
+Not modifying` e o `hud` continua sendo o do repositório: `rm ~/.local/bin/hud`
+e `pipx install --force ~/dev/hud`.
 
 ## Entrada
 
