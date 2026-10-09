@@ -23,7 +23,7 @@ class PyprojectTest(unittest.TestCase):
         self.assertEqual(self.data["build-system"]["build-backend"], "setuptools.build_meta")
         self.assertIn("version", self.project["dynamic"])
         self.assertEqual(self.data["tool"]["setuptools"]["dynamic"]["version"], {"attr": "hud.__version__"})
-        self.assertEqual(hud.__version__, "0.4.0")
+        self.assertRegex(hud.__version__, r"^\d+\.\d+\.\d+$")  # a tag vX.Y.Z do release tem de bater
 
     def test_sem_dependencias(self):
         self.assertEqual(self.project.get("dependencies", []), [])
