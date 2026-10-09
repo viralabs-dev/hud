@@ -132,8 +132,10 @@ class ParseTest(unittest.TestCase):
             self.bad(with_panel({"id": "x", "tipo": "texto", "arquivo": arq}))
         self.bad(with_panel({"id": "x", "tipo": "arquivo"}), "caminho")
         self.bad(with_panel({"id": "x", "tipo": "arquivo", "caminho": "rel/log"}), "absoluto")
-        self.ok(with_panel({"id": "x", "tipo": "arquivo", "caminho": "/var/log/syslog"}))
-        self.bad(with_panel({"id": "x", "tipo": "arquivo", "caminho": "/var/log/x", "linhas": 2001}))
+        # "/var/log/syslog" não é absoluto no Windows (falta a unidade)
+        log = r"C:\Logs\app.log" if WINDOWS else "/var/log/syslog"
+        self.ok(with_panel({"id": "x", "tipo": "arquivo", "caminho": log}))
+        self.bad(with_panel({"id": "x", "tipo": "arquivo", "caminho": log, "linhas": 2001}))
         self.bad(with_panel({"id": "x", "tipo": "comando"}), "argv")
         self.bad(with_panel({"id": "x", "tipo": "comando", "argv": ["sudo", "ls"]}), "não é permitido")
         self.bad(with_panel({"id": "x", "tipo": "comando", "argv": ["bash", "-c", "id"]}))

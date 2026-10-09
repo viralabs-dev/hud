@@ -2,6 +2,7 @@
 
 import importlib.util
 import re
+import sys
 import tomllib
 import unittest
 from pathlib import Path
@@ -12,6 +13,10 @@ CUSTOM = ROOT / "custom"
 BUILTIN = {"sistema", "comandos", "agenda", "uso_claude", "uso_codex", "vault", "pasta", "saida"}
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 HAS_LAYOUT = importlib.util.find_spec("hud.layout") is not None
+# Customizações que dependem de algo só do Linux: o `monitor` lê /var/log/syslog
+# (no Windows não é caminho absoluto) e roda `ss` (não existe no macOS nem no
+# Windows). layout.load as recusa de propósito fora do Linux.
+LINUX_ONLY = {"monitor"}
 
 
 def frontmatter(text: str) -> dict[str, str]:
@@ -93,6 +98,8 @@ class CustomTest(unittest.TestCase):
 
         for path in layouts():
             with self.subTest(custom=path.parent.name):
+                if path.parent.name in LINUX_ONLY and not sys.platform.startswith("linux"):
+                    self.skipTest(f"{path.parent.name} só carrega no Linux (syslog e ss)")
                 try:
                     layout.load(path)
                 except (TypeError, layout.LayoutError) as first:

@@ -820,6 +820,8 @@ class Hud:
                 self.scr.timeout(200)
             if isinstance(nxt, str) and nxt in MODE_KEYS:
                 self.set_mode(MODE_KEYS[nxt])
+            elif nxt == "[":
+                self.raw_mouse()
             elif nxt is None:
                 self.inp, self.cur = "", 0
         elif ch == "\x15":  # Ctrl+U
@@ -849,6 +851,58 @@ class Hud:
             self.scroll += WHEEL_STEP
         elif bstate & WHEEL_DOWN:
             self.scroll = max(0, self.scroll - WHEEL_STEP)
+
+    def wheel(self, button: int) -> None:
+        """Botão do protocolo xterm: 64 = roda para cima, 65 = para baixo."""
+        if button & 64 and not button & 128:
+            if button & 3 == 0:
+                self.scroll += WHEEL_STEP
+            elif button & 3 == 1:
+                self.scroll = max(0, self.scroll - WHEEL_STEP)
+
+    def raw_mouse(self) -> None:
+        """Roda do mouse que o curses não traduziu em KEY_MOUSE.
+
+        O ncurses do macOS (5.7) não conhece o formato SGR (ESC[<b;x;yM) e devolve
+        a sequência crua: ESC, depois "[<64;10;10M". Aqui lemos o resto, sem
+        esperar, e tratamos SGR e o formato antigo X10 (ESC[M seguido de 3 bytes).
+        Outra sequência ESC[ continua sendo descartada como antes.
+        """
+        def nxt():
+            try:
+                c = self.scr.get_wch()
+            except curses.error:
+                return None
+            return c if isinstance(c, str) else None
+
+        self.scr.nodelay(True)
+        try:
+            c = nxt()
+            if c == "<":
+                buf = ""
+                while len(buf) < 24:
+                    c = nxt()
+                    if c is None or c in "Mm":
+                        break
+                    buf += c
+                else:
+                    return
+                if c == "M":
+                    head = buf.split(";", 1)[0]
+                    if head.isdigit():
+                        self.wheel(int(head))
+            elif c == "M":
+                b = nxt()
+                nxt(), nxt()  # coluna e linha
+                if b:
+                    self.wheel(ord(b) - 32)
+            elif c is not None:
+                try:
+                    curses.unget_wch(c)
+                except (curses.error, AttributeError):
+                    pass
+        finally:
+            self.scr.timeout(200)
 
     def backspace(self) -> None:
         if self.cur:
