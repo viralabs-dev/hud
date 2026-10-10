@@ -51,12 +51,27 @@ TABS = tuple(MODE_KEYS.values())  # cada modo tem a sua aba na SAÍDA
 # PDCurses manda Alt+N como uma tecla só (ALT_1...); o ncurses manda Esc + N.
 ALT_KEYS = {getattr(curses, f"ALT_{n}"): m for n, m in MODE_KEYS.items() if hasattr(curses, f"ALT_{n}")}
 
+# Comandos / do HUD para as sugestões da ENTRADA (a ajuda completa está em HELP).
+SLASH = [
+    ("/ajuda", "tudo o que a entrada aceita"), ("/ag", "marca na agenda: /ag amanhã 14h texto"),
+    ("/b", "busca no Vault"), ("/c", "pergunta ao Claude"), ("/comandos", "comandos / do Claude Code"),
+    ("/conflitos", "conflitos de sync do Vault"), ("/custom", "lista, usa ou salva customizações"),
+    ("/doc", "planeja documentação · /doc salvar grava"), ("/limpar", "limpa a aba aberta"),
+    ("/notas", "últimas notas"), ("/novo", "conversa nova com o agente"), ("/o", "pergunta ao OpenCode"),
+    ("/ok", "conclui um item da agenda"), ("/parar", "interrompe o agente"),
+    ("/pasta", "lê outra pasta · /pasta vault volta"), ("/perfil", "leitura ou completo"),
+    ("/project", "lista ou cria projetos"), ("/r", "roda um comando do painel"),
+    ("/rm", "apaga um item da agenda"), ("/sair", "fecha o HUD"), ("/skill", "usa uma skill pelo nome"),
+    ("/skills", "lista as skills"), ("/vault", "relê a pasta agora"), ("/x", "pergunta ao Codex"),
+]
+
 HELP = """\
 Teclas
   F1–F10 ou /r N · roda o comando do painel
   Alt+1 notas · Alt+2 Claude · Alt+3 Codex · Alt+4 OpenCode · Tab alterna entre eles (ou clique na aba)
   A SAÍDA tem uma aba por modo; ● = aba com saída nova ainda não vista
   Enter · envia a linha · ↑/↓ · histórico · Esc · limpa a linha
+  / mostra os comandos na borda da entrada · Tab completa o comando (fora disso, alterna o modo)
   roda do mouse ou PgUp/PgDn · rola a aba aberta · Ctrl+L · redesenha · Ctrl+C · sai
 Entrada
   texto livre · vira nota com data e hora (notas.md, fora do Vault)
@@ -987,6 +1002,30 @@ class Hud:
         for i, win in enumerate(u.windows[: h - 2]):
             self.usage_row(y + 1 + i, x, w, win.label, win.left, win.resets_at)
 
+    def slash_suggestions(self) -> list[tuple[str, str]]:
+        """Comandos / que combinam com o que está digitado (sem espaço ainda)."""
+        t = self.inp
+        if not t.startswith("/") or t.startswith("//") or " " in t:
+            return []
+        found = [(c, d) for c, d in SLASH if c.startswith(t.lower())]
+        agent = self.agents.get(self.mode)
+        if self.mode == "claude" and agent:  # os do Claude Code entram no modo Claude
+            names = {c for c, _ in found}
+            found += [("/" + c, "Claude Code") for c in agent.session.slash_commands
+                      if ("/" + c).startswith(t) and "/" + c not in names]
+        return found
+
+    def complete_slash(self) -> bool:
+        """Tab com "/…" na entrada: completa até onde todos concordam (ou o único)."""
+        found = self.slash_suggestions()
+        if not found:
+            return False
+        names = [c for c, _ in found]
+        common = os.path.commonprefix(names)
+        self.inp = names[0] + " " if len(names) == 1 else max(common, self.inp, key=len)
+        self.cur = len(self.inp)
+        return True
+
     def draw_input(self, y: int, x: int, h: int, w: int) -> tuple[int, int]:
         spin = SPIN[self.tick % len(SPIN)]
         busy = [n for n, a in self.agents.items() if a.busy]
@@ -1007,15 +1046,50 @@ class Hud:
             self.put(y, x + 4 + width(title) + 2, " ⚠ ferramentas completas ", "warn")
         iw = w - 6
         prompt_x = x + 2
+        tx = prompt_x + 2
         self.put(y + 1, prompt_x, "✦" if agent else "›", color or "accent")
-        # Janela horizontal que acompanha o cursor.
+        if not self.inp and not self.pending:
+            # Linha vazia: o que dá para fazer neste modo, esmaecido.
+            names = {"claude": "o Claude", "codex": "o Codex", "opencode": "o OpenCode"}
+            ph = (f"pergunte a {names.get(self.mode, self.mode)} · / para comandos · Tab muda de modo"
+                  if agent else "escreva uma nota · / para comandos · /ajuda mostra tudo")
+            self.put(y + 1, tx, ph, "dim", iw)
+        # Janela horizontal que acompanha o cursor, com … onde há texto escondido.
         before = self.inp[: self.cur]
         start = 0
-        while width(before[start:]) > iw - 1:
+        while width(before[start:]) > iw - 2:
             start += 1
         shown = self.inp[start:]
-        self.put(y + 1, prompt_x + 2, shown, "text", iw)
-        return y + 1, prompt_x + 2 + width(self.inp[start: self.cur])
+        cut = width(shown) > iw
+        if cut:
+            shown = fit(shown, iw - 1, ellipsis=False)
+        if start:
+            self.put(y + 1, tx - 1, "…", "dim")
+        self.put(y + 1, tx, shown, "text")
+        if cut:
+            self.put(y + 1, tx + width(shown), "…", "dim")
+        # Borda de baixo: sugestões de /, posição no histórico ou o tamanho do texto.
+        bottom = y + h - 1
+        sugg = self.slash_suggestions() if not self.pending else []
+        if sugg:
+            if len(sugg) == 1:
+                cmd, desc = sugg[0]
+                nx = self.put(bottom, x + 2, f" {cmd} ", "accent")
+                self.put(bottom, nx, f"{desc} · Tab completa ", "dim", x + w - 2 - nx)
+            else:
+                nx = x + 2
+                for k, (cmd, _) in enumerate(sugg):
+                    item = f" {cmd} "
+                    if nx + width(item) > x + w - 18:
+                        self.put(bottom, nx, f" +{len(sugg) - k} ", "dim")
+                        break
+                    nx = self.put(bottom, nx, item, "accent" if k == 0 else "text")
+                self.put(bottom, x + w - 2 - width(" Tab completa "), " Tab completa ", "dim")
+        elif self.history and self.hist_i < len(self.history) and self.inp == self.history[self.hist_i]:
+            self.put(bottom, x + 2, f" histórico {self.hist_i + 1}/{len(self.history)} · ↑/↓ ", "dim")
+        elif width(self.inp) > iw:
+            self.put(bottom, x + 2, f" {len(self.inp)} caracteres ", "dim")
+        return y + 1, tx + width(self.inp[start: self.cur])
 
     # ── teclado ──────────────────────────────────────────────────────────
     def key(self, ch) -> None:
@@ -1040,6 +1114,8 @@ class Hud:
                 self.say(f"{item.name}: cancelado", "dim")
             return
         if ch == curses.KEY_RESIZE:
+            return
+        if ch == "\t" and self.complete_slash():
             return
         if ch == "\t":
             modes = ["notas", *self.agents]

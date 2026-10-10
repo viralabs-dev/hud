@@ -682,6 +682,21 @@ executable = {q(str(self.opencode_exe))}
 
         self.hud.wait_for(quebrou, what="título quebrado em duas linhas")
 
+    def test_19_entrada_sugere_e_completa(self):
+        s = self.hud.screen
+        self.hud.wait_for("escreva uma nota")  # texto de exemplo com a linha vazia
+        self.hud.send("/sk")
+        self.hud.wait_for(lambda s: "/skill " in s.line(s.rows - 1) and "/skills" in s.line(s.rows - 1),
+                          what="sugestões na borda")
+        self.hud.send("\t")  # completa até o que /skill e /skills têm em comum
+        self.hud.wait_for(lambda s: "› /skill " in s.line(s.rows - 2) or s.line(s.rows - 2).rstrip(" │").endswith("/skill"),
+                          what="Tab completou")
+        self.wait_input("ENTRADA", "›")  # Tab completou em vez de trocar de modo
+        self.hud.send("\x15/doc")
+        self.hud.wait_for("planeja documentação")  # uma só: a descrição dela
+        self.hud.send("\x15")
+        self.hud.wait_for("escreva uma nota")
+
     def test_08_roda_do_mouse_rola_a_saida(self):
         self.hud.type("/ajuda")
         self.hud.wait_for("Segurança")
