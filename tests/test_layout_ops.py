@@ -278,7 +278,7 @@ class TestDumps(unittest.TestCase):
             '[[coluna]]\nlargura = 33.5\npaineis = [{ id = "sistema", altura = 7 }, "log", "agentes"]\n'
             '[[coluna]]\npaineis = [{ id = "saida", peso = 2.5 }, "notas"]\n'
             '[[painel]]\nid = "log"\ntitulo = "LOG \\"x\\""\ntipo = "arquivo"\n'
-            'caminho = "/tmp/hud.log"\nlinhas = 50\n'
+            'caminho = "~/hud.log"\nlinhas = 50\n'
             '[[painel]]\nid = "notas"\ntipo = "texto"\narquivo = "notas.md"\n'
             '[[bloco]]\nid = "sistema"\ntitulo = "MÁQUINA"\nmostrar = ["rede", "cpu"]\n'
             '[[bloco]]\nid = "agenda"\ndias = 3\n'

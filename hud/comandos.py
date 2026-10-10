@@ -77,7 +77,10 @@ def parse_proposals(texto: str) -> Proposta | None:
 
 
 def _rotulo(c: Command, pos: int) -> str:
-    args = " ".join([os.path.basename(c.argv[0]), *c.argv[1:]])
+    exe = os.path.basename(c.argv[0])
+    if plat.WINDOWS and exe.lower().endswith(".exe"):  # "HOSTNAME.EXE" → "hostname", como foi escrito
+        exe = exe[:-4].lower()
+    args = " ".join([exe, *c.argv[1:]])
     return f"F{pos + 1} {c.name} · {args}"
 
 
