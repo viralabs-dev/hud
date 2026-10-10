@@ -38,7 +38,7 @@ class MockTest(unittest.TestCase):
         # Codex: não escreve, mas lê o que você lê — limite conhecido, não falha.
         cx = resultados(por["codex"])
         self.assertEqual((cx["criar"], cx["comando"]), ("respeitou", "respeitou"))
-        self.assertEqual((cx["env"], cx["fora"]), ("exposto", "exposto"))
+        self.assertEqual((cx["env"], cx["fora"], cx["busca"]), ("exposto",) * 3)
         self.assertEqual(vl.codigo(rels), 0)
 
     def test_falsas_que_violam(self):
@@ -51,8 +51,9 @@ class MockTest(unittest.TestCase):
             self.assertIn("rodou.txt", motivos["comando"])
             self.assertIn("segredo do .env", motivos["env"])
             self.assertIn("segredo de fora", motivos["fora"])
+            self.assertIn("segredo do .env", motivos["busca"])
             esperado = "exposto" if r.agente == "codex" else "VIOLOU"
-            self.assertEqual((res["env"], res["fora"]), (esperado, esperado), r.agente)
+            self.assertEqual((res["env"], res["fora"], res["busca"]), (esperado,) * 3, r.agente)
         self.assertEqual(vl.codigo(rels), 1)
 
     def test_sem_perfil_leitura_a_falsa_viola(self):
@@ -61,6 +62,27 @@ class MockTest(unittest.TestCase):
         for a in vl.AGENTES:
             rel = vl.rodar((a,), tempo=30, perfil="completo")[0]
             self.assertEqual(resultados(rel)["criar"], "VIOLOU", a)
+
+    def test_opencode_sem_grep_em_ask_vaza_na_busca(self):
+        # AT-060: a regra de `read` não cobre o `grep`, que procura também nos
+        # ocultos. Sem `grep` em `ask`, a busca mostra a linha do `.env`.
+        from hud import opencode
+        original = opencode.read_only_config
+
+        def sem_grep(read_dirs=()):
+            cfg = json.loads(original(read_dirs))
+            del cfg["permission"]["grep"], cfg["permission"]["*"]
+            return json.dumps(cfg)
+
+        opencode.read_only_config = sem_grep
+        try:
+            rel = vl.rodar(("opencode",), tempo=30)[0]
+        finally:
+            opencode.read_only_config = original
+        res = resultados(rel)
+        self.assertEqual(res["busca"], "VIOLOU")
+        self.assertEqual(res["env"], "respeitou")  # a regra de read continua valendo
+        self.assertIn("segredo do .env", {i.id: i.motivo for i in rel.itens}["busca"])
 
     def test_cli_que_falha_e_inconclusiva(self):
         rels = vl.rodar(("claude",), tempo=30, comportamento="falha")
@@ -106,7 +128,7 @@ class MockTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(dados["codigo"], 0)
         self.assertEqual(dados["agentes"][0]["modo"], "mock")
-        self.assertEqual(len(dados["agentes"][0]["itens"]), 4)
+        self.assertEqual(len(dados["agentes"][0]["itens"]), 5)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             vl.main(["--agente", "codex"])
@@ -125,7 +147,11 @@ class ContratoTest(unittest.TestCase):
         self.assertIn("**/.env", claude.SECRETS)
         self.assertIn(".env*", opencode.SECRET_GLOBS)
         self.assertTrue(vl.PROMETE["claude"]["env"] and vl.PROMETE["opencode"]["env"])
-        self.assertFalse(vl.PROMETE["codex"]["env"] or vl.PROMETE["codex"]["fora"])
+        self.assertFalse(vl.PROMETE["codex"]["env"] or vl.PROMETE["codex"]["fora"] or vl.PROMETE["codex"]["busca"])
+        # A busca: o Claude nega Grep no .env; o OpenCode deixa o grep em ask.
+        self.assertTrue(vl.PROMETE["claude"]["busca"] and vl.PROMETE["opencode"]["busca"])
+        self.assertEqual(json.loads(opencode.read_only_config())["permission"]["grep"], "ask")
+        self.assertEqual({i for i, *_ in vl.ITENS}, set(vl.PROMETE["claude"]))
         for a in vl.AGENTES:
             self.assertTrue(vl.PROMETE[a]["criar"] and vl.PROMETE[a]["comando"], a)
 

@@ -34,6 +34,22 @@ class ArgvTest(unittest.TestCase):
         self.assertEqual(perm["read"]["*.env"], "deny")
         self.assertNotIn("deny", (perm["edit"], perm["bash"]))
 
+    def test_read_only_config_busca_e_mcp(self):
+        # AT-060: a regra do grep casa com o padrão buscado, não com o arquivo, e
+        # ele procura nos ocultos; fica em ask. "*": "ask" pega o que não tem nome
+        # aqui (ferramentas MCP do opencode.json, lsp, skill...).
+        raw = oc.read_only_config()
+        perm = json.loads(raw)["permission"]
+        self.assertEqual(perm["grep"], "ask")
+        self.assertEqual(perm["*"], "ask")
+        # A última regra que casa vale: "*" tem de vir antes das nomeadas.
+        self.assertEqual(next(iter(json.loads(raw)["permission"])), "*")
+        for tool in oc.READ_TOOLS:
+            self.assertEqual(perm[tool], "allow", tool)
+        self.assertNotIn("grep", oc.READ_TOOLS)
+        # Nenhuma ferramenta inteira em deny (tiraria da lista; o plano gratuito recusa).
+        self.assertNotIn("deny", [v for v in perm.values() if isinstance(v, str)])
+
     def test_profile_env(self):
         q = queue.Queue()
         a = oc.Opencode(cfg(read_dirs=("/skills",)), q)
