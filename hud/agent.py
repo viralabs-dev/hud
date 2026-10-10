@@ -55,7 +55,7 @@ def agent_env(prefixes: tuple[str, ...]) -> dict[str, str]:
 
 
 def describe_tool(name: str, inp) -> str:
-    for key in ("file_path", "pattern", "path", "query", "url", "command", "skill", "prompt"):
+    for key in ("file_path", "filePath", "pattern", "path", "query", "url", "command", "skill", "prompt"):
         v = inp.get(key) if isinstance(inp, dict) else None
         if isinstance(v, str) and v:
             return f"{name} {clean_line(v)}"
@@ -95,6 +95,10 @@ class Agent:
         """Ajuste do prompt antes de enviar (o Codex não tem prompt de sistema)."""
         return prompt
 
+    def extra_env(self) -> dict[str, str]:
+        """Variáveis que o agente acrescenta ao ambiente mínimo (o OpenCode põe o perfil aqui)."""
+        return {}
+
     def emit(self, kind: str, *args) -> None:
         self.events.put((kind, self.name, *args))
 
@@ -119,7 +123,8 @@ class Agent:
         try:
             proc = subprocess.Popen(
                 self.argv(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, env=agent_env(self.env_prefixes), cwd=self.cfg.cwd,
+                stderr=subprocess.PIPE, env={**agent_env(self.env_prefixes), **self.extra_env()},
+                cwd=self.cfg.cwd,
                 close_fds=True, shell=False, **plat.popen_group_kwargs(),
             )
         except OSError as e:

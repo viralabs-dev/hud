@@ -69,6 +69,14 @@ def main() -> int:
                   f" ({'sandbox read-only' if x.profile == 'leitura' else 'config do ~/.codex'})")
         else:
             print("codex: desligado")
+        if cfg.opencode:
+            o = cfg.opencode
+            via = f" (via {' '.join(o.launch)})" if o.launch else ""
+            print(f"opencode: {o.executable}{via} · cwd {o.cwd} · modelo {o.model or 'o padrão do opencode'}"
+                  f" · perfil inicial {o.profile}"
+                  f" ({'edição, bash e web recusados' if o.profile == 'leitura' else 'config do opencode.json'})")
+        else:
+            print("opencode: desligado")
         for w in cfg.warnings:
             print(f"aviso: {w}")
         return 1 if cfg.warnings else 0

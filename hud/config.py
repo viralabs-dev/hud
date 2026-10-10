@@ -18,6 +18,7 @@ from . import plataforma as plat
 from .agent import PROFILES
 from .claude import PERMISSION_MODES, ClaudeConfig
 from .codex import CodexConfig
+from .opencode import DEFAULT_MODEL as OPENCODE_MODEL, OpencodeConfig
 
 if plat.WINDOWS:  # grp e pwd não existem no Windows
     grp = pwd = None
@@ -111,6 +112,7 @@ class Config:
     custom_dir: Path | None = None  # None = custom/ na raiz do repositório
     folder_source: str = "config"
     codex: CodexConfig | None = None
+    opencode: OpencodeConfig | None = None
 
 
 def _private_group(gid: int) -> bool:
@@ -305,6 +307,14 @@ def load(path: Path | None = None, folder: str | None = None) -> Config:
                 warnings.append("Codex abre no perfil completo (sandbox e aprovações do seu ~/.codex)")
         except ConfigError as e:
             warnings.append(f"Codex desligado: {e}")
+    if data.get("opencode", {}).get("enabled", True) is not False:
+        try:
+            cfg.opencode = build_opencode(data.get("opencode", {}), cfg.vault)
+            if cfg.opencode.profile == "completo":
+                warnings.append("OpenCode abre no perfil completo (permissões do seu opencode.json)")
+        except ConfigError as e:
+            if data.get("opencode"):  # só avisa quem configurou; o OpenCode é opcional
+                warnings.append(f"OpenCode desligado: {e}")
     if not cfg.vault.is_dir():
         warnings.append(f"pasta não encontrada: {cfg.vault}")
     elif cfg.vault == Path.home():
@@ -319,18 +329,20 @@ RISKY_TOOLS = {"Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch",
 
 
 def agent_dirs() -> list[str]:
-    """Windows: onde procurar claude e codex — o PATH fixo, o npm global
-    (%APPDATA%\\npm) e ~\\.local\\bin (instalador nativo do Claude Code)."""
+    """Windows: onde procurar os agentes — o PATH fixo, o npm global
+    (%APPDATA%\\npm), ~\\.local\\bin (instalador nativo do Claude Code) e
+    ~\\.opencode\\bin (instalador do OpenCode)."""
     dirs = SAFE_PATH.split(";")
     appdata = os.environ.get("APPDATA", "")
     if appdata:
         dirs.append(os.path.join(appdata, "npm"))
     dirs.append(os.path.join(os.path.expanduser("~"), ".local", "bin"))
+    dirs.append(os.path.join(os.path.expanduser("~"), ".opencode", "bin"))
     return dirs
 
 
 def resolve_agent(name) -> str:
-    """Executável de um agente: PATH fixo e ~/.local/bin, nada gravável por outros.
+    """Executável de um agente: PATH fixo, ~/.local/bin e ~/.opencode/bin, nada gravável por outros.
 
     No Windows: também %APPDATA%\\npm; aceita .exe e o shim .cmd do npm, que
     `agent_launch` troca por node.exe + script (nunca cmd.exe)."""
@@ -344,7 +356,9 @@ def resolve_agent(name) -> str:
     elif os.path.isabs(os.path.expanduser(name)):
         exe = os.path.expanduser(name)
     else:
-        exe = shutil.which(name, path=SAFE_PATH + ":" + os.path.expanduser("~/.local/bin"))
+        # ~/.opencode/bin é onde o instalador oficial do OpenCode põe o binário.
+        user_bins = (os.path.expanduser("~/.local/bin"), os.path.expanduser("~/.opencode/bin"))
+        exe = shutil.which(name, path=":".join((SAFE_PATH, *user_bins)))
     if not exe or not os.access(exe, os.X_OK):
         raise ConfigError(f"'{name}' não encontrado")
     real = os.path.realpath(exe)
@@ -426,7 +440,9 @@ def _common(raw: dict, default_cwd: str) -> tuple[str, str, float, str]:
     if not isinstance(timeout, (int, float)) or not 10 <= timeout <= 3600:
         raise ConfigError("'timeout' entre 10 e 3600 segundos")
     model = raw.get("model", "")
-    if not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9._\[\]-]*", model):
+    # provedor/modelo:variante (OpenCode) cabe; começar com "-" viraria opção do agente.
+    if (not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9._:/\[\]-]*", model)
+            or model.startswith("-")):
         raise ConfigError("'model' inválido")
     profile = raw.get("profile", "leitura")
     if profile not in PROFILES:
@@ -442,6 +458,17 @@ def build_codex(raw: dict, vault: Path | None = None) -> CodexConfig:
     cwd, model, timeout, profile = _common(raw, str(vault) if vault and vault.is_dir() else "~")
     return CodexConfig(executable=exe, cwd=cwd, model=model, timeout=timeout, profile=profile,
                        follow_folder="cwd" not in raw, launch=launch)
+
+
+def build_opencode(raw: dict, vault: Path | None = None) -> OpencodeConfig:
+    if not isinstance(raw, dict):
+        raise ConfigError("[opencode] precisa ser uma tabela")
+    exe = resolve_agent(raw.get("executable", "opencode"))
+    launch = agent_launch(exe)
+    folder = str(vault) if vault and vault.is_dir() else "~"
+    cwd, model, timeout, profile = _common({"model": OPENCODE_MODEL, **raw}, folder)
+    return OpencodeConfig(executable=exe, cwd=cwd, model=model, timeout=timeout, profile=profile,
+                          follow_folder="cwd" not in raw, launch=launch)
 
 
 def build_claude(raw: dict, vault: Path | None = None) -> ClaudeConfig:

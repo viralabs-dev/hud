@@ -31,6 +31,7 @@ from . import layout as lay
 from . import usage as us
 from .claude import Claude
 from .codex import Codex
+from .opencode import Opencode
 from .runner import Runner
 from .text import clean_line, fit, pad, width, wrap
 from .vault import VaultWatcher
@@ -44,7 +45,7 @@ WHEEL_UP = getattr(curses, "BUTTON4_PRESSED", 0)
 WHEEL_DOWN = getattr(curses, "BUTTON5_PRESSED", 0x200000)
 WHEEL_STEP = 3
 CLICK = getattr(curses, "BUTTON1_PRESSED", 0) | getattr(curses, "BUTTON1_CLICKED", 0)
-MODE_KEYS = {"1": "notas", "2": "claude", "3": "codex"}  # Alt+1/2/3
+MODE_KEYS = {"1": "notas", "2": "claude", "3": "codex", "4": "opencode"}  # Alt+1/2/3/4
 TABS = tuple(MODE_KEYS.values())  # cada modo tem a sua aba na SAÍDA
 # PDCurses manda Alt+N como uma tecla só (ALT_1...); o ncurses manda Esc + N.
 ALT_KEYS = {getattr(curses, f"ALT_{n}"): m for n, m in MODE_KEYS.items() if hasattr(curses, f"ALT_{n}")}
@@ -52,7 +53,7 @@ ALT_KEYS = {getattr(curses, f"ALT_{n}"): m for n, m in MODE_KEYS.items() if hasa
 HELP = """\
 Teclas
   F1–F10 ou /r N · roda o comando do painel
-  Alt+1 notas · Alt+2 Claude · Alt+3 Codex · Tab alterna entre os três (ou clique na aba)
+  Alt+1 notas · Alt+2 Claude · Alt+3 Codex · Alt+4 OpenCode · Tab alterna entre eles (ou clique na aba)
   A SAÍDA tem uma aba por modo; ● = aba com saída nova ainda não vista
   Enter · envia a linha · ↑/↓ · histórico · Esc · limpa a linha
   roda do mouse ou PgUp/PgDn · rola a aba aberta · Ctrl+L · redesenha · Ctrl+C · sai
@@ -71,16 +72,16 @@ Skills e projetos (com o agente do modo; nas notas, o Claude ou o Codex)
   /project · lista os projetos da pasta · /project pedido · cria um projeto novo no modelo do Vault, ou consulta
   /doc pedido · planeja e escreve documentação no modelo, ou consulta (skill projeto-docs)
   /doc salvar · grava na pasta os arquivos .md que o agente propôs (pede s para sobrescrever) · /doc descartar
-  Os comandos / do HUD valem em qualquer modo (notas, Claude, Codex); só os do Claude vão para ele.
-Claude Code (laranja) e Codex (cinza)
-  /c pergunta · pergunta ao Claude · /x pergunta · pergunta ao Codex (a conversa continua)
-  Tab · alterna notas → Claude → Codex: no modo de um agente, texto livre vai para ele
+  Os comandos / do HUD valem em qualquer modo (notas, Claude, Codex, OpenCode); só os do Claude vão para ele.
+Claude Code (laranja), Codex (cinza) e OpenCode (lilás)
+  /c pergunta · ao Claude · /x pergunta · ao Codex · /o pergunta · ao OpenCode (a conversa continua)
+  Tab · alterna notas → Claude → Codex → OpenCode: no modo de um agente, texto livre vai para ele
   No modo Claude, comandos / que o HUD não conhece vão para o Claude (/review, skills…);
   //comando força mandar ao agente um nome que o HUD também usa (ex.: //clear)
   /comandos · lista os comandos / do Claude · /novo · nova conversa · /parar · interrompe
   /perfil leitura|completo · troca o perfil do agente do modo atual nesta sessão
-    leitura: Claude só lê o Vault, sem MCP · Codex em sandbox read-only
-    completo: o mesmo Claude Code / Codex do seu terminal (ferramentas, MCP, skills)
+    leitura: Claude só lê o Vault, sem MCP · Codex em sandbox read-only · OpenCode sem edição, bash e web
+    completo: o mesmo Claude Code / Codex / OpenCode do seu terminal (ferramentas, MCP, skills)
 Segurança
   Só rodam os comandos da lista: sem shell, PATH e ambiente fixos, tempo-limite e saída limitada.
   O HUD só escreve na pasta (o Vault ou a de /pasta) com /doc salvar: arquivos .md propostos, sem sair da pasta.
@@ -126,6 +127,8 @@ class Hud:
             self.agents["claude"] = Claude(cfg.claude, self.events)
         if cfg.codex:
             self.agents["codex"] = Codex(cfg.codex, self.events)
+        if cfg.opencode:
+            self.agents["opencode"] = Opencode(cfg.opencode, self.events)
         self.mode = "notas"  # ou o nome de um agente
         self.usage = us.UsageTracker()
         self.codex_usage = us.CodexUsageTracker()
@@ -337,6 +340,7 @@ class Hud:
             pairs["claude"] = 208 if rich else curses.COLOR_YELLOW
             pairs["codex"] = 248 if rich else curses.COLOR_WHITE
             pairs["codex_dim"] = 242 if rich else curses.COLOR_WHITE
+            pairs["opencode"] = 141 if rich else curses.COLOR_MAGENTA  # lilás
             for i, (k, col) in enumerate(pairs.items(), 1):
                 curses.init_pair(i, col if col < curses.COLORS else curses.COLOR_WHITE, bg)
                 self.c[k] = curses.color_pair(i)
@@ -352,6 +356,7 @@ class Hud:
             "blank": A.A_NORMAL,
             "claude": self.c.get("claude", A.A_BOLD), "claude_dim": self.c.get("claude", 0) | A.A_DIM,
             "codex": self.c.get("codex", 0), "codex_dim": self.c.get("codex_dim", A.A_DIM),
+            "opencode": self.c.get("opencode", 0), "opencode_dim": self.c.get("opencode", 0) | A.A_DIM,
         }
 
     def level(self, pct: float) -> str:
@@ -625,7 +630,7 @@ class Hud:
         view = lines[max(0, start): max(0, start) + ih]
         self.box(y, x, h, w, "SAÍDA")
         nx = self.draw_tabs(y, x + 2 + width(" SAÍDA ") + 1, x + w - 2)
-        right = f"↑ {self.scroll} linhas · roda ou PgDn volta" if self.scroll else "roda do mouse · PgUp/PgDn"
+        right = f"↑ {self.scroll} linhas · PgDn volta" if self.scroll else "roda · PgUp/PgDn"
         room = x + w - 2 - nx - 2
         if room >= 8:
             r = fit(f" {right} ", room)
@@ -808,10 +813,10 @@ class Hud:
             color = self.mode
             prof = agent.profile.upper()
             title = f"{self.mode.upper()} · {prof}" + (f" {spin} respondendo" if agent.busy else "")
-            hint = "Alt+1 notas · Alt+2/3 agentes · /perfil · /novo · /parar"
+            hint = "Alt+1 notas · Alt+2/3/4 agentes · /perfil · /novo · /parar"
         else:
             title = "ENTRADA" + "".join(f" · {n} {spin}" for n in busy)
-            hint = self.layout_note or "texto = nota · Alt+2 Claude · Alt+3 Codex · /ajuda"
+            hint = self.layout_note or "texto = nota · Alt+2 Claude · Alt+3 Codex · Alt+4 OpenCode · /ajuda"
         self.box(y, x, h, w, title, hint, color)
         if agent and agent.profile == "completo":
             self.put(y, x + 4 + width(title) + 2, " ⚠ ferramentas completas ", "warn")
@@ -1052,7 +1057,7 @@ class Hud:
             self.say(f"{name} desligado (veja os avisos no início ou hud --check)", "warn")
             return
         if not prompt:
-            self.say(f"uso: /{name[0] if name == 'claude' else 'x'} pergunta", "warn")
+            self.say(f"uso: /{ {'claude': 'c', 'codex': 'x', 'opencode': 'o'}.get(name, name)} pergunta", "warn")
             return
         if agent.busy:
             self.say(f"o {name} ainda está respondendo · /parar interrompe", "warn")
@@ -1103,6 +1108,8 @@ class Hud:
             self.ask("claude", arg)
         elif verb in ("/x", "/codex"):
             self.ask("codex", arg)
+        elif verb in ("/o", "/opencode"):
+            self.ask("opencode", arg)
         elif verb == "/novo":
             name, agent = self.current_agent(arg)
             if agent:
@@ -1301,7 +1308,7 @@ class Hud:
             self.say("nenhum agente ligado", "warn")
             return
         if not want:
-            self.say(f"{name}: perfil {agent.profile} · uso: /perfil leitura|completo [claude|codex]", "dim")
+            self.say(f"{name}: perfil {agent.profile} · uso: /perfil leitura|completo [claude|codex|opencode]", "dim")
             return
         if agent.busy:
             self.say(f"o {name} está respondendo · /parar antes de trocar o perfil", "warn")
@@ -1309,9 +1316,10 @@ class Hud:
         agent.profile = want
         agent.new_session()
         if want == "completo":
-            what = ("ferramentas, MCP, skills e comandos / do seu Claude Code, permission-mode "
-                    f"{agent.cfg.full_permission_mode}" if name == "claude"
-                    else "sandbox e aprovações do seu ~/.codex/config.toml")
+            what = {"claude": "ferramentas, MCP, skills e comandos / do seu Claude Code, permission-mode "
+                              f"{getattr(agent.cfg, 'full_permission_mode', '')}",
+                    "codex": "sandbox e aprovações do seu ~/.codex/config.toml",
+                    "opencode": "permissões do seu opencode.json"}.get(name, "configuração do seu terminal")
             self.say(f"⚠ {name} no perfil completo: {what}. Nova conversa.", "warn")
         else:
             self.say(f"{name} no perfil leitura. Nova conversa.", name)

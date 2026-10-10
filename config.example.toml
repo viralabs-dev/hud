@@ -91,3 +91,13 @@ executable = "codex"
 profile = "leitura"
 # model = "gpt-6.1-sol"          # padrão: o do seu ~/.codex/config.toml
 timeout = 600
+
+# OpenCode local (Alt+4, /o pergunta). Leitura: edição, bash, web e pastas de
+# fora ficam em "ask", que o `opencode run` recusa sozinho; segredos negados.
+[opencode]
+enabled = true
+executable = "opencode"           # procura também em ~/.opencode/bin
+# cwd = "~/Vault"                # padrão: a pasta do HUD (acompanha o /pasta)
+profile = "leitura"
+model = "opencode/big-pickle"     # provedor/modelo; sem modelo o opencode run pode esperar para sempre
+timeout = 600

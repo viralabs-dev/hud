@@ -283,7 +283,7 @@ hud                        # precisa de 80×24 ou mais
 hud --check                # mostra a configuração e os comandos resolvidos
 hud --pasta ~/dev/projeto  # lê outra pasta no lugar do Vault, só nesta execução
 hud --custom-check foco    # valida uma customização
-hud --instalar-skill       # instala a skill hud-custom no Claude Code e no Codex
+hud --instalar-skill       # instala as skills do HUD no Claude Code e no Codex
 ```
 
 O binário, o `bin/hud` e o pipx ignoram `PYTHONPATH`, o site do usuário e o
@@ -298,12 +298,12 @@ diretório atual: um `json.py` ou `curses.py` plantado não é carregado
 | `/ag amanhã 14h dentista` | agenda (`hoje`, `amanhã`, `+3`, `sex`, `12/10`, `2026-10-12`; hora `14h`, `9:30`) |
 | `/ok N` · `/rm N` | conclui · apaga o item N da agenda |
 | `/r N` · `/r nome` | roda um comando do painel (também F1–F10) |
-| Alt+1 · Alt+2 · Alt+3 | abre a aba e a entrada de notas · Claude · Codex (Tab alterna entre os três; clicar na aba também) |
+| Alt+1 · Alt+2 · Alt+3 · Alt+4 | abre a aba e a entrada de notas · Claude · Codex · OpenCode (Tab alterna entre eles; clicar na aba também) |
 | `/pasta caminho` · `/pasta vault` | lê outra pasta local no lugar do Vault (lembrada) · volta ao Vault |
 | `/b termo` | busca no Vault, nome e conteúdo |
 | `/notas [N]` · `/conflitos` · `/vault` | últimas notas · conflitos de sync · relê o Vault |
-| `/c pergunta` · `/x pergunta` | pergunta ao Claude Code · ao Codex; a conversa continua |
-| Tab | alterna notas → Claude (laranja) → Codex (cinza); no modo de um agente, texto livre vai para ele |
+| `/c pergunta` · `/x pergunta` · `/o pergunta` | pergunta ao Claude Code · ao Codex · ao OpenCode; a conversa continua |
+| Tab | alterna notas → Claude (laranja) → Codex (cinza) → OpenCode (lilás); no modo de um agente, texto livre vai para ele |
 | `/perfil leitura\|completo` | troca o perfil do agente do modo atual (abre conversa nova) |
 | `/comandos` | lista os comandos `/` do Claude Code; no modo Claude, `/qualquer` que o HUD não conhece vai para o Claude e `//nome` força |
 | `/novo` · `/parar` | nova conversa · interrompe a resposta |
@@ -318,7 +318,7 @@ Os comandos `/` do HUD valem em qualquer modo da entrada (notas, Claude ou
 Codex); só os comandos `/` próprios do Claude Code são repassados ao Claude.
 
 **Abas da SAÍDA.** Cada modo tem a sua aba, com o próprio histórico e a própria
-rolagem: `1 NOTAS`, `2 CLAUDE` (laranja) e `3 CODEX` (cinza), na borda de cima
+rolagem: `1 NOTAS`, `2 CLAUDE` (laranja), `3 CODEX` (cinza) e `4 OPENCODE` (lilás), na borda de cima
 da SAÍDA. A aba aberta é sempre a do modo da entrada. A resposta de um agente
 vai para a aba dele mesmo quando a pergunta saiu de outra (`/c …` nas notas), e
 a aba ganha um `●` até ser aberta. O resultado de um comando do painel (F1–F10)
@@ -438,16 +438,18 @@ grava com `/custom salvar` e usa com `/custom <nome>`. Fora do HUD, o agente
 grava direto na pasta das customizações. A pasta `custom/` vai para um repositório
 público: nada de credencial, token ou caminho pessoal num `layout.toml`.
 
-## Claude Code e Codex
+## Claude Code, Codex e OpenCode
 
-A entrada conversa com dois agentes, cada um com a sua cor: **Claude Code em
-laranja** e **Codex em cinza** (borda e prompt da entrada, e as linhas dele na
-SAÍDA). Os dois têm dois perfis:
+A entrada conversa com três agentes, cada um com a sua cor e a sua aba:
+**Claude Code em laranja** (Alt+2, `/c`), **Codex em cinza** (Alt+3, `/x`) e
+**OpenCode em lilás** (Alt+4, `/o`) — borda e prompt da entrada, e as linhas
+dele na SAÍDA. Um agente que não está instalado simplesmente não aparece. Os
+três têm dois perfis:
 
-| perfil | Claude | Codex |
-|---|---|---|
-| `leitura` (padrão) | só `Read`/`Grep`/`Glob` nas pastas de `read_dirs`, sem MCP, `dontAsk` | sandbox `read-only`: não escreve nem usa a rede, mas **lê o disco todo** |
-| `completo` | o seu Claude Code: ferramentas, MCP, skills e comandos `/`, `--permission-mode` de `full_permission_mode` (padrão `auto`) | o seu Codex: sandbox e aprovações do `~/.codex/config.toml` |
+| perfil | Claude | Codex | OpenCode |
+|---|---|---|---|
+| `leitura` (padrão) | só `Read`/`Grep`/`Glob` nas pastas de `read_dirs`, sem MCP, `dontAsk` | sandbox `read-only`: não escreve nem usa a rede, mas **lê o disco todo** | edição, bash, web e pastas fora da pasta do HUD em `ask`, que o `opencode run` recusa sozinho; `.env`, chaves e credenciais negados na leitura |
+| `completo` | o seu Claude Code: ferramentas, MCP, skills e comandos `/`, `--permission-mode` de `full_permission_mode` (padrão `auto`) | o seu Codex: sandbox e aprovações do `~/.codex/config.toml` | o seu OpenCode: permissões do seu `opencode.json` (o que estiver em `ask` continua recusado) |
 
 O perfil completo é escolha sua (`/perfil completo` na sessão ou `profile` na
 config); a entrada mostra **⚠ ferramentas completas** enquanto ele vale. Nos dois
@@ -457,6 +459,13 @@ carrega os MCP.
 
 O Codex roda `codex exec --json` e retoma a conversa com `codex exec resume
 <thread_id>`; o fim de cada resposta mostra os tokens da conversa.
+
+O OpenCode roda `opencode run --format json -m <modelo>` (padrão
+`opencode/big-pickle`, gratuito; troque em `[opencode] model`) e continua a
+conversa com `--session <id>`. O perfil leitura usa `ask`, e não `deny`, de
+propósito: `deny` tira a ferramenta da lista, e o plano gratuito do OpenCode
+recusa a chamada quando a lista muda. Uma pergunta que precisaria de permissão
+termina com a recusa na SAÍDA, sem nada escrito.
 
 ### Claude
 

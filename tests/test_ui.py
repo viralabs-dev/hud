@@ -38,7 +38,7 @@ ROWS, COLS = 40, 120
 WAIT = 10.0
 
 F2 = b"\x1bOQ"
-ALT = {n: b"\x1b" + str(n).encode() for n in (1, 2, 3)}
+ALT = {n: b"\x1b" + str(n).encode() for n in (1, 2, 3, 4)}
 WHEEL_UP = b"\x1b[<64;10;10M"
 WHEEL_DOWN = b"\x1b[<65;10;10M"
 ORANGE, GRAY = 208, 248
@@ -144,6 +144,21 @@ for ev in (
     {"type": "thread.started", "thread_id": "t1"},
     {"type": "item.completed", "item": {"type": "agent_message", "text": "oi codex falso"}},
     {"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 5}},
+):
+    print(json.dumps(ev), flush=True)
+"""
+
+
+FAKE_OPENCODE = """#!/usr/bin/env python3
+import json, os, sys
+data = sys.stdin.read()
+with open(LOG, "a", encoding="utf-8") as f:
+    f.write(json.dumps({"argv": sys.argv[1:], "stdin": data,
+                        "config": os.environ.get("OPENCODE_CONFIG_CONTENT", "")}) + "\\n")
+for ev in (
+    {"type": "step_start", "sessionID": "ses_t", "part": {"type": "step-start"}},
+    {"type": "text", "sessionID": "ses_t", "part": {"type": "text", "text": "oi opencode falso"}},
+    {"type": "step_finish", "sessionID": "ses_t", "part": {"reason": "stop", "tokens": {"total": 42}}},
 ):
     print(json.dumps(ev), flush=True)
 """
@@ -257,14 +272,17 @@ class UiTest(unittest.TestCase):
         bindir.mkdir(mode=0o700)
         cls.claude_log = cls.tmp / "claude.log"
         cls.codex_log = cls.tmp / "codex.log"
+        cls.opencode_log = cls.tmp / "opencode.log"
         for name, src, log in (("claude", FAKE_CLAUDE, cls.claude_log),
-                               ("codex", FAKE_CODEX, cls.codex_log)):
+                               ("codex", FAKE_CODEX, cls.codex_log),
+                               ("opencode", FAKE_OPENCODE, cls.opencode_log)):
             exe = bindir / name
             exe.write_text(src.replace("LOG", json.dumps(str(log)))
                            .replace("PROPOSTA_JSON", json.dumps(PROPOSTA_TEXTO))
                            .replace("DOCS_JSON", json.dumps(DOCS_TEXTO)), encoding="utf-8")
             os.chmod(exe, 0o700)
         cls.claude_exe, cls.codex_exe = bindir / "claude", bindir / "codex"
+        cls.opencode_exe = bindir / "opencode"
         cls.env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": str(cls.home),
@@ -317,9 +335,12 @@ executable = {q(str(self.claude_exe))}
 
 [codex]
 executable = {q(str(self.codex_exe))}
+
+[opencode]
+executable = {q(str(self.opencode_exe))}
 """, encoding="utf-8")
         os.chmod(self.config, 0o600)
-        for log in (self.claude_log, self.codex_log):
+        for log in (self.claude_log, self.codex_log, self.opencode_log):
             log.unlink(missing_ok=True)
         self.hud = HudProcess(self.config, self.env)
         self.addCleanup(self.hud.close)
@@ -585,10 +606,35 @@ executable = {q(str(self.codex_exe))}
         self.hud.wait_for("2 arquivo(s) gravado(s)")
         self.assertIn("echo dentro-do-bloco", (self.vault / "Beta" / "Beta.md").read_text(encoding="utf-8"))
 
+    def test_15_opencode_na_aba_4(self):
+        s = self.hud.screen
+        self.hud.wait_for("4 OPENCODE")
+        self.hud.send(ALT[4])
+        self.wait_input("OPENCODE · LEITURA", "✦")
+        self.hud.type("pergunta ao opencode")
+        self.hud.wait_for("oi opencode falso")
+        self.hud.wait_for("✓ opencode")
+        calls = self.calls(self.opencode_log)
+        self.assertEqual(len(calls), 1)
+        argv, stdin = calls[0]["argv"], calls[0]["stdin"]
+        self.assertEqual(argv[:3], ["run", "--format", "json"])
+        self.assertNotIn("pergunta ao opencode", " ".join(argv))  # prompt só pela entrada padrão
+        self.assertTrue(stdin.startswith("[Contexto do HUD:"))
+        self.assertTrue(stdin.endswith("pergunta ao opencode"))
+        perm = json.loads(calls[0]["config"])["permission"]
+        self.assertEqual((perm["edit"], perm["bash"]), ("ask", "ask"))
+        # Segunda pergunta continua a sessão.
+        self.hud.type("/o de novo")
+        self.hud.wait_for(lambda s: len(self.calls(self.opencode_log)) == 2, what="segunda chamada")
+        self.assertEqual(self.calls(self.opencode_log)[1]["argv"][-2:], ["--session", "ses_t"])
+        self.hud.send(ALT[1])
+        self.wait_input("ENTRADA", "›")
+        self.assertIn("4 OPENCODE", s.text())
+
     def test_08_roda_do_mouse_rola_a_saida(self):
         self.hud.type("/ajuda")
         self.hud.wait_for("Segurança")
-        self.hud.wait_for("roda do mouse · PgUp/PgDn")
+        self.hud.wait_for("roda · PgUp/PgDn")
         self.hud.send(WHEEL_UP)
         self.hud.wait_for("↑ 3 linhas")
         self.hud.send(WHEEL_UP)
@@ -596,7 +642,7 @@ executable = {q(str(self.codex_exe))}
         self.hud.send(WHEEL_DOWN)
         self.hud.wait_for("↑ 3 linhas")
         self.hud.send(WHEEL_DOWN)
-        self.hud.wait_for(lambda s: "roda do mouse · PgUp/PgDn" in s.text() and "linhas · roda" not in s.text(),
+        self.hud.wait_for(lambda s: "roda · PgUp/PgDn" in s.text() and "linhas · PgDn" not in s.text(),
                           what="saída de volta ao fim")
 
     def test_09_terminal_pequeno_e_volta(self):

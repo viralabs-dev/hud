@@ -58,7 +58,7 @@ WAIT = 15.0
 GIT = "/usr/bin/git" if os.path.exists("/usr/bin/git") else "git"
 
 F1 = b"\x1bOP"
-ALT = {n: b"\x1b" + str(n).encode() for n in (1, 2, 3)}
+ALT = {n: b"\x1b" + str(n).encode() for n in (1, 2, 3, 4)}
 WHEEL_UP = b"\x1b[<64;60;20M"
 WHEEL_DOWN = b"\x1b[<65;60;20M"
 
@@ -95,6 +95,7 @@ SCENES = {
     "04-ajuda": "/ajuda na saída.",
     "05-rolagem": "Saída rolada para cima com a roda do mouse.",
     "06-pasta": "/pasta com um projeto de exemplo no lugar do Vault.",
+    "07-opencode": "Aba e modo OpenCode (lilás): a pergunta e a resposta do OpenCode falso.",
 }
 
 
@@ -154,6 +155,23 @@ out({"type": "item.completed", "item": {"type": "agent_message", "text":
      "2. Ideias: testar o protótipo no celular\n"
      "3. Leituras: terminar o capítulo 4"}})
 time.sleep(600)
+'''
+
+FAKE_OPENCODE = r'''#!/usr/bin/env python3
+"""OpenCode FALSO da gravação: responde no formato do `opencode run --format json`."""
+import json, sys, time
+sys.stdin.read()
+def out(ev, pause=0.4):
+    ev.setdefault("sessionID", "ses_demo")
+    print(json.dumps(ev, ensure_ascii=False), flush=True)
+    time.sleep(pause)
+out({"type": "step_start", "part": {"type": "step-start"}})
+out({"type": "tool_use", "part": {"tool": "glob", "state": {"status": "completed", "input": {"pattern": "Projetos/**/*.md"}}}})
+out({"type": "text", "part": {"type": "text", "text":
+     "Os dois quadros têm 2 cards em andamento:\n"
+     "- Site novo: Montar o protótipo navegável, Revisar o formulário de contato\n"
+     "- Mudança de escritório: Separar os móveis que ficam"}})
+out({"type": "step_finish", "part": {"reason": "stop", "tokens": {"total": 1830}}}, 0)
 '''
 
 
@@ -260,6 +278,7 @@ def build_demo() -> dict:
     write(bindir / "claude", FAKE_CLAUDE.replace("RESET5", str(int(now + 132 * 60)))
           .replace("RESET7", str(int(now + (3 * 1440 + 310) * 60))), 0o700)
     write(bindir / "codex", FAKE_CODEX, 0o700)
+    write(bindir / "opencode", FAKE_OPENCODE, 0o700)
 
     q = json.dumps
     config = DEMO / "config.toml"
@@ -299,6 +318,9 @@ executable = {q(str(bindir / "claude"))}
 
 [codex]
 executable = {q(str(bindir / "codex"))}
+
+[opencode]
+executable = {q(str(bindir / "opencode"))}
 """)
     env = {
         "PATH": "/usr/bin:/bin",
@@ -467,6 +489,13 @@ def run_session(demo: dict, stage: Path) -> dict:
         sess.scene("03-codex", 0.8)
         sess.type("/parar: interrompe o Codex", "/parar")
         sess.wait_for(lambda s: "respondendo" not in input_title(s), "Codex parado")
+
+        # 3b. modo OpenCode (lilás)
+        sess.send("Alt+4: modo OpenCode", ALT[4])
+        sess.wait_for(lambda s: "OPENCODE ·" in input_title(s), "entrada no modo OpenCode")
+        sess.type("pergunta ao OpenCode", "o que está em andamento nos quadros?", 0.2)
+        sess.wait_for("✓ opencode", "resposta do OpenCode")
+        sess.scene("07-opencode", 0.8)
 
         # 4. /ajuda
         sess.send("Alt+1: modo notas", ALT[1])
