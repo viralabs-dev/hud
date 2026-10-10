@@ -533,7 +533,7 @@ executable = {q(str(self.opencode_exe))}
         self.hud.wait_for("eco")
         self.hud.type("/custom foco")
         self.hud.wait_for("LEMBRETES")
-        self.assertEqual((self.data / "custom").read_text(encoding="utf-8").strip(), "foco")
+        self.assertEqual((self.data / "custom-escolhida").read_text(encoding="utf-8").strip(), "foco")
         self.assertEqual(self.calls(self.claude_log), [])  # nada foi para o agente
         # Painel de comando: recusar mantém desligado; aceitar roda e grava a confiança.
         self.hud.type("/custom eco")
@@ -550,7 +550,7 @@ executable = {q(str(self.opencode_exe))}
         self.assertIn("eco", json.loads((self.data / "custom_confianca.json").read_text()))
         self.hud.type("/custom padrao")
         self.hud.wait_for("AGENDA")
-        self.assertFalse((self.data / "custom").exists())
+        self.assertFalse((self.data / "custom-escolhida").exists())
 
     def test_12_proposta_do_agente_vira_customizacao(self):
         self.hud.send(ALT[2])

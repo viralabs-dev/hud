@@ -279,13 +279,31 @@ class TrustTest(unittest.TestCase):
             (Path(d) / "foco" / "layout.toml").write_text('[[coluna]]\npaineis = ["saida", "vault"]\n')
             self.assertNotEqual(a, cu.digest(Path(d), "foco"))
 
+    def test_choice_does_not_clash_with_installed_custom_root(self):
+        # HUD instalado: custom_root() é data_dir/custom (pasta); a escolha não pode
+        # usar o mesmo caminho.
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "custom").mkdir()
+            cu.remember(Path(d), "foco")
+            self.assertEqual(cu.remembered(Path(d)), "foco")
+            self.assertTrue((Path(d) / "custom").is_dir())
+
+    def test_legacy_choice_file_is_migrated(self):
+        with tempfile.TemporaryDirectory() as d:
+            old = Path(d) / "custom"
+            old.write_text("foco\n")
+            old.chmod(0o600)
+            self.assertEqual(cu.remembered(Path(d)), "foco")
+            self.assertFalse(old.exists())
+            self.assertEqual((Path(d) / cu.CHOICE_FILE).read_text(), "foco\n")
+
     def test_remember(self):
         with tempfile.TemporaryDirectory() as d:
             self.assertIsNone(cu.remembered(Path(d)))
             cu.remember(Path(d), "foco")
             self.assertEqual(cu.remembered(Path(d)), "foco")
             if not WINDOWS:
-                self.assertEqual(stat.S_IMODE((Path(d) / "custom").stat().st_mode), 0o600)
+                self.assertEqual(stat.S_IMODE((Path(d) / cu.CHOICE_FILE).stat().st_mode), 0o600)
             cu.remember(Path(d), None)
             self.assertIsNone(cu.remembered(Path(d)))
             with self.assertRaises(cu.CustomError):

@@ -85,7 +85,7 @@ printf 'pasta de teste do scripts/roteiro-cosmic.sh do HUD\n' > "$MARCA"
 CASA="$PASTA/home"
 CFG_DIR="$CASA/.config/hud"
 DADOS="$CASA/.local/share/hud"
-# Fora de data_dir: lá, "custom" é o arquivo que lembra a customização escolhida.
+# Fora de data_dir, como no repositório (no HUD instalado, data_dir/custom é a pasta de customizações).
 CUSTOM="$CASA/custom"
 VAULT="$CASA/Vault"
 OUTRA="$CASA/Outra pasta"

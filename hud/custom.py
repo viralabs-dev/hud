@@ -25,7 +25,10 @@ from .runner import OUTPUT_CAP, safe_env
 from .text import clean
 
 TRUST_FILE = "custom_confianca.json"
-CHOICE_FILE = "custom"
+CHOICE_FILE = "custom-escolhida"
+# Até a v0.17.0 a escolha ficava em `custom`, o mesmo caminho da pasta de
+# customizações do HUD instalado (`custom_root`): uma das duas sempre falhava.
+LEGACY_CHOICE_FILE = "custom"
 TAIL_BYTES = 256 * 1024
 MAX_LINES = 2000
 
@@ -158,7 +161,17 @@ def needs_trust(layout: Layout) -> list[tuple[str, ...]]:
     return [p.argv for p in layout.paineis.values() if p.tipo == "comando" and p.id in used]
 
 
+def _migrate_choice(data_dir: Path) -> None:
+    """Move a escolha do nome antigo (`custom`, arquivo) para `custom-escolhida`."""
+    old, new = Path(data_dir) / LEGACY_CHOICE_FILE, Path(data_dir) / CHOICE_FILE
+    if old.is_symlink() or not old.is_file() or new.exists():
+        return
+    check_private_file(old)
+    os.replace(old, new)
+
+
 def remembered(data_dir: Path) -> str | None:
+    _migrate_choice(data_dir)
     f = Path(data_dir) / CHOICE_FILE
     if not f.exists():
         return None
