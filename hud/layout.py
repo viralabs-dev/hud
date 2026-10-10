@@ -7,11 +7,12 @@ tela pela metade. `compute` transforma o layout em caixas (y, x, h, w).
 
 import errno
 import fnmatch
+import json
 import os
 import re
 import stat
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from . import plataforma as plat
@@ -22,6 +23,8 @@ NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
 MAX_FILE = 64 * 1024
 MIN_H = 3
 MIN_COL_W = 30
+MAX_COLS = 4
+MAX_SLOTS = 8
 
 # id → (altura, peso). Altura "auto" vem calculada pela UI em `compute(auto=)`.
 BUILTIN: dict[str, tuple[int | str | None, float | None]] = {
@@ -32,8 +35,16 @@ BUILTIN: dict[str, tuple[int | str | None, float | None]] = {
     "uso_codex": ("auto", None),
     "vault": (None, 1.0),
     "saida": (None, 1.0),
+    "agentes": (None, 1.0),
 }
 ALIASES = {"pasta": "vault"}
+# Blocos: o que cada painel embutido aceita em `mostrar` (na ordem em que o
+# `dumps` escreve). Quem não está aqui só aceita `titulo` (agenda também `dias`).
+MOSTRAR: dict[str, tuple[str, ...]] = {
+    "sistema": ("cpu", "historico", "mem", "swap", "disco", "load", "rede", "sensores"),
+    "vault": ("resumo", "quadros", "atencao", "recentes"),
+    "agentes": ("processos", "sessoes"),
+}
 TIPOS = ("texto", "arquivo", "comando")
 
 DENIED_DIRS = ("~/.ssh", "~/.gnupg", "~/.aws", "~/.config/gh", "~/.kube",
@@ -85,6 +96,15 @@ class PanelSpec:
     timeout: float = 10.0
 
 
+@dataclass(frozen=True)
+class BlocoSpec:
+    """Opções de um painel embutido, vindas de `[[bloco]]`."""
+    id: str
+    titulo: str = ""                       # vazio = o título padrão
+    mostrar: frozenset[str] | None = None  # None = tudo
+    dias: int | None = None                # só agenda
+
+
 @dataclass
 class Layout:
     nome: str
@@ -93,6 +113,7 @@ class Layout:
     colunas: list[Column] = field(default_factory=list)
     paineis: dict[str, PanelSpec] = field(default_factory=dict)
     avisos: list[str] = field(default_factory=list)
+    blocos: dict[str, BlocoSpec] = field(default_factory=dict)
 
     def ids(self) -> list[str]:
         return [s.id for c in self.colunas for s in c.slots]
@@ -213,6 +234,49 @@ def _panel(raw, base_dir: Path | None, avisos: list[str]) -> PanelSpec:
                      intervalo=float(intervalo), timeout=float(timeout))
 
 
+def _bloco(raw) -> BlocoSpec:
+    if not isinstance(raw, dict):
+        raise LayoutError("[[bloco]] precisa ser uma tabela")
+    bid = raw.get("id")
+    if not isinstance(bid, str) or not bid:
+        raise LayoutError("[[bloco]] sem 'id'")
+    bid = ALIASES.get(bid, bid)
+    if bid not in BUILTIN:
+        raise LayoutError(f"[[bloco]] '{bid}': não é painel embutido "
+                          f"({', '.join(BUILTIN)}); painel próprio se ajusta em [[painel]]")
+    allowed = {"id", "titulo"}
+    if bid in MOSTRAR:
+        allowed.add("mostrar")
+    if bid == "agenda":
+        allowed.add("dias")
+    extra = set(raw) - allowed
+    if extra:
+        raise LayoutError(f"bloco '{bid}': chave desconhecida: {', '.join(sorted(extra))} "
+                          f"(aceita {', '.join(sorted(allowed))})")
+    titulo = raw.get("titulo", "")
+    if not isinstance(titulo, str):
+        raise LayoutError(f"bloco '{bid}': 'titulo' precisa ser texto")
+    titulo = clean_line(titulo).strip()
+    if len(titulo) > 30:
+        raise LayoutError(f"bloco '{bid}': 'titulo' tem até 30 caracteres")
+    mostrar = None
+    if "mostrar" in raw:
+        valores = raw["mostrar"]
+        if not isinstance(valores, list) or not valores or not all(isinstance(v, str) for v in valores):
+            raise LayoutError(f"bloco '{bid}': 'mostrar' é uma lista não vazia de textos")
+        bad = [v for v in valores if v not in MOSTRAR[bid]]
+        if bad:
+            raise LayoutError(f"bloco '{bid}': valor desconhecido em 'mostrar': {', '.join(bad)} "
+                              f"(aceita {', '.join(MOSTRAR[bid])})")
+        if len(set(valores)) != len(valores):
+            raise LayoutError(f"bloco '{bid}': valor repetido em 'mostrar'")
+        mostrar = frozenset(valores)
+    dias = raw.get("dias")
+    if dias is not None and not (_int(dias) and 1 <= dias <= 30):
+        raise LayoutError(f"bloco '{bid}': 'dias' é um inteiro de 1 a 30")
+    return BlocoSpec(bid, titulo, mostrar, dias)
+
+
 def _meta(data: dict, key: str, cut: int) -> str:
     v = data.get(key, "")
     if not isinstance(v, str):
@@ -224,7 +288,7 @@ def parse(data: dict, nome: str, base_dir: Path | None = None) -> Layout:
     if not isinstance(data, dict):
         raise LayoutError("layout precisa ser uma tabela TOML")
     avisos: list[str] = []
-    extra = set(data) - {"nome", "descricao", "autor", "coluna", "painel"}
+    extra = set(data) - {"nome", "descricao", "autor", "coluna", "painel", "bloco"}
     if extra:
         avisos.append(f"chave ignorada: {', '.join(sorted(extra))}")
     declared = _meta(data, "nome", 80)
@@ -242,9 +306,18 @@ def parse(data: dict, nome: str, base_dir: Path | None = None) -> Layout:
             raise LayoutError(f"[[painel]] '{p.id}' declarado duas vezes")
         lay.paineis[p.id] = p
 
+    raw_blocos = data.get("bloco", [])
+    if not isinstance(raw_blocos, list):
+        raise LayoutError("[[bloco]] precisa ser uma lista de tabelas")
+    for raw in raw_blocos:
+        b = _bloco(raw)
+        if b.id in lay.blocos:
+            raise LayoutError(f"[[bloco]] '{b.id}' declarado duas vezes")
+        lay.blocos[b.id] = b
+
     cols = data.get("coluna")
-    if not isinstance(cols, list) or not 1 <= len(cols) <= 4:
-        raise LayoutError("o layout precisa de 1 a 4 [[coluna]]")
+    if not isinstance(cols, list) or not 1 <= len(cols) <= MAX_COLS:
+        raise LayoutError(f"o layout precisa de 1 a {MAX_COLS} [[coluna]]")
     seen: set[str] = set()
     declared_w = []
     for ci, col in enumerate(cols, 1):
@@ -259,8 +332,8 @@ def parse(data: dict, nome: str, base_dir: Path | None = None) -> Layout:
                 raise LayoutError(f"coluna {ci}: 'largura' de 15 a 85 (%)")
             declared_w.append(float(larg))
         raw_slots = col.get("paineis")
-        if not isinstance(raw_slots, list) or not 1 <= len(raw_slots) <= 8:
-            raise LayoutError(f"coluna {ci}: de 1 a 8 painéis")
+        if not isinstance(raw_slots, list) or not 1 <= len(raw_slots) <= MAX_SLOTS:
+            raise LayoutError(f"coluna {ci}: de 1 a {MAX_SLOTS} painéis")
         slots = []
         for raw in raw_slots:
             s = _slot(raw, ci)
@@ -281,6 +354,9 @@ def parse(data: dict, nome: str, base_dir: Path | None = None) -> Layout:
     for pid in lay.paineis:
         if pid not in seen:
             avisos.append(f"[[painel]] '{pid}' não está em nenhuma coluna")
+    for bid in lay.blocos:
+        if bid not in seen:
+            avisos.append(f"[[bloco]] '{bid}' não está em nenhuma coluna")
     return lay
 
 
@@ -424,3 +500,285 @@ DEFAULT = Layout(
         Column(None, (Slot("vault", None, 55.0), Slot("saida", None, 45.0))),
     ],
 )
+
+
+# ---------------------------------------------------------------------------
+# Operações sobre o layout (arraste de painéis) e escrita em TOML.
+# Todas são puras: devolvem um Layout novo e nunca mexem no recebido.
+# ---------------------------------------------------------------------------
+
+def check(layout: Layout) -> None:
+    """Levanta LayoutError se o layout não passaria pelo `parse`."""
+    cols = layout.colunas
+    if not 1 <= len(cols) <= MAX_COLS:
+        raise LayoutError(f"o layout precisa de 1 a {MAX_COLS} colunas")
+    seen: set[str] = set()
+    declared = []
+    for ci, col in enumerate(cols, 1):
+        if not 1 <= len(col.slots) <= MAX_SLOTS:
+            raise LayoutError(f"coluna {ci}: de 1 a {MAX_SLOTS} painéis")
+        if col.largura is not None:
+            if not 15 <= col.largura <= 85:
+                raise LayoutError(f"coluna {ci}: 'largura' de 15 a 85 (%)")
+            declared.append(col.largura)
+        for s in col.slots:
+            if s.id not in BUILTIN and s.id not in layout.paineis:
+                raise LayoutError(f"'{s.id}' não é painel embutido nem está em [[painel]]")
+            if s.id in seen:
+                raise LayoutError(f"'{s.id}' aparece mais de uma vez")
+            seen.add(s.id)
+    total = sum(declared)
+    if len(declared) < len(cols) and total > 90:
+        raise LayoutError("larguras somam mais de 90% e ainda há coluna sem largura")
+    if total > 100:
+        raise LayoutError("larguras somam mais de 100%")
+    if "saida" not in seen:
+        raise LayoutError("o painel 'saida' é obrigatório")
+
+
+def _with_cols(layout: Layout, cols: list[Column]) -> Layout:
+    new = Layout(nome=layout.nome, descricao=layout.descricao, autor=layout.autor,
+                 colunas=list(cols), paineis=dict(layout.paineis), avisos=list(layout.avisos),
+                 blocos=dict(layout.blocos))
+    check(new)
+    return new
+
+
+def _where(layout: Layout, pid: str) -> tuple[int, int]:
+    pid = ALIASES.get(pid, pid)
+    for ci, col in enumerate(layout.colunas):
+        for si, s in enumerate(col.slots):
+            if s.id == pid:
+                return ci, si
+    raise LayoutError(f"'{pid}' não está no layout")
+
+
+def swap(layout: Layout, a: str, b: str) -> Layout:
+    """Troca as posições de dois painéis; cada um leva a sua altura/peso."""
+    (ca, sa), (cb, sb) = _where(layout, a), _where(layout, b)
+    slots = [list(c.slots) for c in layout.colunas]
+    slots[ca][sa], slots[cb][sb] = layout.colunas[cb].slots[sb], layout.colunas[ca].slots[sa]
+    return _with_cols(layout, [replace(c, slots=tuple(s)) for c, s in zip(layout.colunas, slots)])
+
+
+def _pct(v: float) -> float:
+    return float(min(85.0, max(15.0, round(v, 1))))
+
+
+def move(layout: Layout, pid: str, col: int, pos: int) -> Layout:
+    """Põe `pid` na coluna `col` (0-based), na posição `pos`.
+
+    `col` conta as colunas do layout atual; `pos` conta os painéis da coluna
+    de destino já sem o painel arrastado (e é limitado ao tamanho dela).
+    `col == len(colunas)` cria uma coluna nova à direita. A coluna que fica
+    vazia some.
+
+    Larguras: a coluna nova nasce sem `largura` (divide o resto com as outras
+    sem largura); se as larguras declaradas passarem do que deixa 1/n da tela
+    para ela (ou de 90%), encolhem todas na mesma proporção. Quando some uma
+    coluna e não sobra nenhuma sem largura, a última passa a ficar com o resto
+    e as demais crescem na mesma proporção, mantendo a relação entre elas.
+    """
+    ci, si = _where(layout, pid)
+    n = len(layout.colunas)
+    if not _int(col) or not 0 <= col <= n:
+        raise LayoutError(f"coluna {col} não existe (de 0 a {n})")
+    if not _int(pos):
+        raise LayoutError("a posição precisa ser um inteiro")
+    src = layout.colunas[ci]
+    slot = src.slots[si]
+    cols: list[Column | None] = list(layout.colunas)
+    cols[ci] = replace(src, slots=src.slots[:si] + src.slots[si + 1:])
+    if col == n:
+        if n >= MAX_COLS and len(src.slots) > 1:
+            raise LayoutError(f"no máximo {MAX_COLS} colunas")
+        cols.append(Column(None, (slot,)))
+    else:
+        target = cols[col]
+        assert target is not None
+        p = max(0, min(pos, len(target.slots)))
+        cols[col] = replace(target, slots=target.slots[:p] + (slot,) + target.slots[p:])
+    removed = not cols[ci].slots  # type: ignore[union-attr]
+    if removed:
+        cols[ci] = None
+    live = [c for c in cols if c is not None]
+    if col == n:
+        declared = sum(c.largura for c in live if c.largura is not None)
+        limit = min(90.0, 100.0 * (len(live) - 1) / len(live))
+        if declared > limit:
+            k = limit / declared
+            live = [replace(c, largura=_pct(c.largura * k)) if c.largura is not None else c
+                    for c in live]
+    if removed and all(c.largura is not None for c in live):
+        if len(live) == 1:
+            live = [replace(live[0], largura=None)]
+        else:
+            total = sum(c.largura for c in live)  # type: ignore[misc]
+            live = [replace(c, largura=_pct(c.largura * 100.0 / total)) for c in live[:-1]] \
+                + [replace(live[-1], largura=None)]
+    return _with_cols(layout, live)
+
+
+def _str(v: str) -> str:
+    return json.dumps(v, ensure_ascii=False)  # string básica do TOML (mesmos escapes)
+
+
+def _numstr(v: float) -> str:
+    return str(int(v)) if float(v).is_integer() else repr(float(v))
+
+
+def _slot_toml(s: Slot) -> str:
+    if (s.altura, s.peso) == BUILTIN.get(s.id, (None, 1.0)):
+        return _str(s.id)
+    if s.peso is not None:
+        return f"{{ id = {_str(s.id)}, peso = {_numstr(s.peso)} }}"
+    if _int(s.altura):
+        return f"{{ id = {_str(s.id)}, altura = {s.altura} }}"
+    return _str(s.id)  # "auto" só existe como padrão de painel embutido
+
+
+def dumps(layout: Layout) -> str:
+    """O layout inteiro em TOML; `parse_text(dumps(L), L.nome)` reproduz L.
+
+    Fica de fora só o que o TOML não expressa: `min_cols`/`max_cols` (só do
+    DEFAULT) e os avisos.
+    """
+    check(layout)
+    out = [f"nome = {_str(layout.nome)}"]
+    if layout.descricao:
+        out.append(f"descricao = {_str(layout.descricao)}")
+    if layout.autor:
+        out.append(f"autor = {_str(layout.autor)}")
+    for col in layout.colunas:
+        out += ["", "[[coluna]]"]
+        if col.largura is not None:
+            out.append(f"largura = {_numstr(col.largura)}")
+        out.append("paineis = [")
+        out += [f"  {_slot_toml(s)}," for s in col.slots]
+        out.append("]")
+    for p in layout.paineis.values():
+        out += ["", "[[painel]]", f"id = {_str(p.id)}", f"titulo = {_str(p.titulo)}",
+                f"tipo = {_str(p.tipo)}"]
+        if p.tipo == "texto":
+            out.append(f"arquivo = {_str(p.arquivo or '')}")
+        elif p.tipo == "arquivo":
+            out += [f"caminho = {_str(p.caminho or '')}", f"linhas = {p.linhas}"]
+        else:
+            out += [f"argv = [{', '.join(_str(a) for a in p.argv)}]",
+                    f"intervalo = {_numstr(p.intervalo)}", f"timeout = {_numstr(p.timeout)}"]
+    for b in layout.blocos.values():
+        out += ["", "[[bloco]]", f"id = {_str(b.id)}"]
+        if b.titulo:
+            out.append(f"titulo = {_str(b.titulo)}")
+        if b.mostrar is not None:
+            vals = [v for v in MOSTRAR.get(b.id, ()) if v in b.mostrar]
+            out.append(f"mostrar = [{', '.join(_str(v) for v in vals)}]")
+        if b.dias is not None:
+            out.append(f"dias = {b.dias}")
+    return "\n".join(out) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Geometria para mouse e foco. `rects` é o que `compute` devolve:
+# {id: (y, x, h, w)}, e (row, col) são células nessa mesma área.
+# ---------------------------------------------------------------------------
+
+Rects = dict[str, tuple[int, int, int, int]]
+DIRECTIONS = ("up", "down", "left", "right")
+
+
+def panel_at(rects: Rects, row: int, col: int) -> str | None:
+    """O painel sob a célula (row, col)."""
+    for pid, (y, x, h, w) in rects.items():
+        if y <= row < y + h and x <= col < x + w:
+            return pid
+    return None
+
+
+def on_title(rects: Rects, row: int, col: int) -> str | None:
+    """O painel cuja borda de cima (a linha do título) passa por (row, col)."""
+    for pid, (y, x, _h, w) in rects.items():
+        if row == y and x <= col < x + w:
+            return pid
+    return None
+
+
+def neighbor(rects: Rects, pid: str, direction: str) -> str | None:
+    """O vizinho em `direction`: primeiro quem se sobrepõe na outra dimensão,
+    depois a menor distância, a maior sobreposição e o centro mais próximo."""
+    if direction not in DIRECTIONS:
+        raise ValueError(f"direção inválida: {direction!r}")
+    pid = ALIASES.get(pid, pid)
+    if pid not in rects:
+        return None
+    y0, x0, h0, w0 = rects[pid]
+    best: tuple | None = None
+    for other, (y, x, h, w) in rects.items():
+        if other == pid:
+            continue
+        if direction == "up":
+            gap = y0 - (y + h)
+        elif direction == "down":
+            gap = y - (y0 + h0)
+        elif direction == "left":
+            gap = x0 - (x + w)
+        else:
+            gap = x - (x0 + w0)
+        if gap < 0:
+            continue
+        if direction in ("up", "down"):
+            overlap = min(x + w, x0 + w0) - max(x, x0)
+            center = abs((2 * x + w) - (2 * x0 + w0))
+        else:
+            overlap = min(y + h, y0 + h0) - max(y, y0)
+            center = abs((2 * y + h) - (2 * y0 + h0))
+        key = (overlap <= 0, gap, -overlap, center, other)
+        if best is None or key < best:
+            best = key
+    return best[-1] if best else None
+
+
+def _shape(layout: Layout) -> list:
+    return [(c.largura, c.slots) for c in layout.colunas]
+
+
+def drop_target(layout: Layout, rects: Rects, row: int, col: int,
+                dragged: str) -> tuple | None:
+    """O que acontece ao soltar `dragged` em (row, col).
+
+    - última coluna de células da tela, com menos de MAX_COLS colunas:
+      ("move", len(colunas), 0), coluna nova à direita;
+    - faixa de cima de um painel (a linha do título, ou 1/4 da altura):
+      ("move", coluna, posição) para entrar antes dele;
+    - faixa de baixo (a última linha, ou 1/4 da altura): ("move", ...) depois dele;
+    - meio de outro painel: ("swap", outro).
+    Devolve None fora dos painéis, no meio do próprio painel, ou quando o
+    resultado seria igual ao layout atual ou inválido. Passar a tupla para
+    `move(layout, dragged, *t[1:])` / `swap(layout, dragged, t[1])` aplica.
+    """
+    dragged = ALIASES.get(dragged, dragged)
+    target = panel_at(rects, row, col)
+    if target is None or dragged not in rects:
+        return None
+    y, x, h, w = rects[target]
+    right_edge = max(rx + rw for (_, rx, _, rw) in rects.values())
+    band = max(1, h // 4)
+    action: tuple
+    if col == right_edge - 1 and len(layout.colunas) < MAX_COLS:
+        action = ("move", len(layout.colunas), 0)
+    elif row < y + band or row >= y + h - band:
+        if target == dragged:
+            return None
+        ci, _ = _where(layout, target)
+        rest = [s.id for s in layout.colunas[ci].slots if s.id != dragged]
+        action = ("move", ci, rest.index(target) + (0 if row < y + band else 1))
+    elif target == dragged:
+        return None
+    else:
+        action = ("swap", target)
+    try:
+        new = move(layout, dragged, action[1], action[2]) if action[0] == "move" \
+            else swap(layout, dragged, action[1])
+    except LayoutError:
+        return None
+    return None if _shape(new) == _shape(layout) else action
