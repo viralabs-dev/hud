@@ -652,6 +652,19 @@ executable = {q(str(self.opencode_exe))}
         self.assertIn("Card parado no teste", text)
         self.assertIn("RECENTES", text)
 
+    def test_17_painel_de_sistema(self):
+        s = self.hud.screen
+        self.hud.wait_for("REDE")
+        rows = {name: s.find(name) for name in ("CPU", "MEM", "LOAD", "REDE")}
+        self.assertTrue(all(rows.values()), rows)
+        cpu, mem = s.line(rows["CPU"][0]), s.line(rows["MEM"][0])
+        # Percentuais na mesma coluna; detalhe alinhado à direita, no fim da barra do painel.
+        self.assertEqual(cpu.index("%"), mem.index("%"))
+        self.assertRegex(cpu, r"núcleos │")
+        self.assertRegex(s.line(rows["LOAD"][0]), r"\d+ proc │")
+        # A borda de baixo tem o "ligado há" e o relógio, sem um cobrir o outro.
+        self.assertIsNotNone(s.find("ligado há"))
+
     def test_08_roda_do_mouse_rola_a_saida(self):
         self.hud.type("/ajuda")
         self.hud.wait_for("Segurança")

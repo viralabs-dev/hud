@@ -477,64 +477,100 @@ class Hud:
     def draw_system(self, y: int, x: int, h: int, w: int) -> None:
         s = self.metrics.last
         self.box(y, x, h, w, "SISTEMA", self.metrics.hostname)
-        iw = w - 4
-        x0, r = x + 2, y + 1
-        lab = 6
-        bw = max(8, iw - lab - 18)
+        iw, x0, lab = w - 4, x + 2, 6
+        up = f" ligado há {human_duration(s.uptime)} "
+        # O relógio encolhe (sem dia da semana, depois só a hora) para não cobrir o "ligado há".
+        for fmt in (" %a %d/%m  %H:%M:%S ", " %d/%m %H:%M:%S ", " %H:%M:%S ", " %H:%M "):
+            clock = time.strftime(fmt)
+            if width(up) + width(clock) + 4 <= w:
+                break
+        self.put(y + h - 1, x + 2, up, "dim", w - 4 - width(clock))
+        self.put(y + h - 1, x + w - 1 - width(clock), clock, "bold")
+
+        mem_pct = 100 * s.mem_used / s.mem_total if s.mem_total else 0
+        meters = [("CPU", s.cpu, f"{s.cores} núcleos"),
+                  ("MEM", mem_pct, f"{human_bytes(s.mem_used)}/{human_bytes(s.mem_total)}")]
+        if s.swap_total:
+            meters.append(("SWAP", 100 * s.swap_used / s.swap_total,
+                           f"{human_bytes(s.swap_used)}/{human_bytes(s.swap_total)}"))
+        disks = [(fit(d.label, lab - 1, False), d.pct, f"{human_bytes(d.total - d.used)} livre") for d in s.disks]
+        # Colunas alinhadas: barras da mesma largura, % numa coluna, detalhe à direita.
+        tail_w = min(max(width(t) for _, _, t in meters + disks), max(0, iw - lab - 5 - 8))
+        bw = max(4, iw - lab - 5 - (tail_w + 1 if tail_w else 0))
 
         def meter(row: int, name: str, pct: float, tail: str) -> None:
             self.put(row, x0, name, "dim")
             self.bar(row, x0 + lab, bw, pct)
-            self.put(row, x0 + lab + bw + 1, f"{pct:3.0f}%", self.level(pct))
-            self.put(row, x0 + lab + bw + 6, tail, "dim", iw - lab - bw - 6)
+            self.put(row, x0 + lab + bw, f"{pct:4.0f}%", self.level(pct))
+            if tail_w:
+                t = fit(tail, tail_w)
+                self.put(row, x0 + iw - width(t), t, "dim")
 
-        meter(r, "CPU", s.cpu, f"{s.cores} núcleos")
-        hist = list(self.metrics.cpu_hist)[-(iw - lab):]
-        spark = "".join(SPARK[min(7, int(v / 100 * 8))] for v in hist)
-        self.put(r + 1, x0 + lab, spark, "accent")
-        mem_pct = 100 * s.mem_used / s.mem_total if s.mem_total else 0
-        meter(r + 2, "MEM", mem_pct, f"{human_bytes(s.mem_used)}/{human_bytes(s.mem_total)}")
+        def spark(row: int) -> None:  # histórico da CPU sob a barra, cada ponto na cor do nível
+            nx = x0 + lab
+            for v in list(self.metrics.cpu_hist)[-bw:]:
+                nx = self.put(row, nx, SPARK[min(7, int(v / 100 * 8))], self.level(v))
+
+        def load(row: int) -> None:
+            self.put(row, x0, "LOAD", "dim")
+            procs = f"{s.procs} proc"
+            if not getattr(s, "load_ok", True):  # Windows não tem load average
+                self.put(row, x0 + lab, "—", "dim")
+            else:
+                l1, l5, l15 = s.load
+                trend = "↑" if l1 > l5 * 1.1 else "↓" if l1 < l5 * 0.9 else "→"
+                nx = self.put(row, x0 + lab, f"{l1:.2f}", self.level(100 * l1 / max(1, s.cores)))
+                nx = self.put(row, nx, f" {trend} ", "dim")
+                self.put(row, nx, f"{l5:.2f}  {l15:.2f}", "dim", x0 + iw - nx - width(procs) - 1)
+            self.put(row, x0 + iw - width(procs), procs, "dim")
+
+        def net(row: int) -> None:
+            self.put(row, x0, "REDE", "dim")
+            if not getattr(s, "net_ok", True):
+                self.put(row, x0 + lab, "—", "dim")
+                return
+            nx = self.put(row, x0 + lab, f"↓ {human_bytes(s.rx_rate, '/s')}", "accent")
+            nx = self.put(row, nx, f"  ↑ {human_bytes(s.tx_rate, '/s')}", "mag")
+            room = x0 + iw - nx - 2
+            hist = list(self.metrics.net_hist)[-room:] if room >= 6 else []
+            top = max(hist, default=0)
+            if top > 0:  # tráfego relativo ao pico da janela
+                line = "".join(SPARK[min(7, int(v / top * 7.99))] for v in hist)
+                self.put(row, x0 + iw - width(line), line, "dim")
+
+        def sensors(row: int) -> None:
+            nx = x0
+            if s.temp is not None:
+                self.put(row, x0, "TEMP", "dim")
+                st = "crit" if s.temp >= 85 else "warn" if s.temp >= 70 else "ok"
+                nx = self.put(row, x0 + lab, f"{s.temp:.0f}°C", st) + 3
+            if s.battery:
+                pct, state = s.battery
+                status = {"Charging": "carregando", "Discharging": "na bateria", "Full": "cheia",
+                          "Not charging": "parada"}.get(state, state.lower())
+                if s.temp is None:
+                    nx = x0
+                nx = self.put(row, nx, "BAT", "dim")
+                nx = self.put(row, max(nx + 1, x0 + lab) if s.temp is None else nx + 1, f"{pct}%",
+                              "crit" if pct <= 15 and state == "Discharging" else "text")
+                self.put(row, nx, f" {status}", "dim", x0 + iw - nx)
+
+        # Linhas por prioridade (1 = sempre); entram as que couberem, na ordem da tela.
+        rows: list[tuple[int, object]] = [(1, lambda r, m=meters[0]: meter(r, *m)), (4, spark),
+                                          (1, lambda r, m=meters[1]: meter(r, *m))]
         if s.swap_total:
-            sw = 100 * s.swap_used / s.swap_total
-            meter(r + 3, "SWAP", sw, f"{human_bytes(s.swap_used)}/{human_bytes(s.swap_total)}")
-        else:
-            self.put(r + 3, x0, "SWAP", "dim")
-            self.put(r + 3, x0 + lab, "sem swap", "dim")
-        row = r + 4
-        for d in s.disks[:2]:
-            meter(row, fit(d.label, lab - 1, False), d.pct,
-                  f"{human_bytes(d.total - d.used)} livre")
-            row += 1
-        row = r + 6
-        self.put(row, x0, "LOAD", "dim")
-        if getattr(s, "load_ok", True):
-            l1, l5, l15 = s.load
-            nx = self.put(row, x0 + lab, f"{l1:.2f}", self.level(100 * l1 / s.cores))
-            self.put(row, nx, f"  {l5:.2f}  {l15:.2f} · {s.procs} proc", "dim", x0 + iw - nx)
-        else:  # Windows não tem load average
-            self.put(row, x0 + lab, f"—  · {s.procs} proc", "dim", iw - lab)
-        self.put(row + 1, x0, "REDE", "dim")
-        if getattr(s, "net_ok", True):
-            nx = self.put(row + 1, x0 + lab, f"↓ {human_bytes(s.rx_rate, '/s')}", "accent")
-            self.put(row + 1, nx, f"   ↑ {human_bytes(s.tx_rate, '/s')}", "mag")
-        else:
-            self.put(row + 1, x0 + lab, "—", "dim")
-        parts: list[tuple[str, str]] = []
-        if s.temp is not None:
-            parts.append((f"{s.temp:.0f}°C", "crit" if s.temp >= 85 else "warn" if s.temp >= 70 else "ok"))
-        if s.battery:
-            pct, st = s.battery
-            status = {"Charging": "carregando", "Discharging": "na bateria", "Full": "cheia",
-                      "Not charging": "parada"}.get(st, st.lower())
-            parts.append((f"bat {pct}% {status}", "crit" if pct <= 15 and st == "Discharging" else "text"))
-        self.put(row + 2, x0, "TEMP" if s.temp is not None else "BAT", "dim")
-        nx = x0 + lab
-        for i, (t, st) in enumerate(parts):
-            nx = self.put(row + 2, nx, ("  ·  " if i else ""), "dim")
-            nx = self.put(row + 2, nx, t, st)
-        self.put(y + h - 1, x + 2, f" ligado há {human_duration(s.uptime)} ", "dim")
-        clock = time.strftime(" %a %d/%m  %H:%M:%S ")
-        self.put(y + h - 1, x + w - 1 - width(clock), clock, "bold")
+            rows.append((3, lambda r, m=meters[2]: meter(r, *m)))
+        for k, d in enumerate(disks[:3]):
+            rows.append((2 if k == 0 else 5 + k, lambda r, d=d: meter(r, *d)))
+        rows += [(9, lambda r: None), (2, load), (2, net)]  # respiro entre medidores e texto, se couber
+        if s.temp is not None or s.battery:
+            rows.append((3, sensors))
+        room = h - 2
+        keep = sorted(range(len(rows)), key=lambda k: (rows[k][0], k))[:room]
+        r = y + 1
+        for k in sorted(keep):
+            rows[k][1](r)
+            r += 1
 
     def draw_commands(self, y: int, x: int, h: int, w: int) -> None:
         self.box(y, x, h, w, "COMANDOS", "F1–F10 · /r N")
