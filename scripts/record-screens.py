@@ -168,7 +168,7 @@ def out(ev, pause=0.4):
 out({"type": "step_start", "part": {"type": "step-start"}})
 out({"type": "tool_use", "part": {"tool": "glob", "state": {"status": "completed", "input": {"pattern": "Projetos/**/*.md"}}}})
 out({"type": "text", "part": {"type": "text", "text":
-     "Os dois quadros têm 2 cards em andamento:\n"
+     "Os dois quadros têm 3 cards em andamento:\n"
      "- Site novo: Montar o protótipo navegável, Revisar o formulário de contato\n"
      "- Mudança de escritório: Separar os móveis que ficam"}})
 out({"type": "step_finish", "part": {"reason": "stop", "tokens": {"total": 1830}}}, 0)
@@ -558,7 +558,7 @@ def readme_fragment(meta: dict) -> str:
         "Execução real do HUD num pseudo-terminal (pty) de 120×40, com `TERM=xterm-256color` e teclas "
         "de verdade. Os PNGs e o GIF são quadros renderizados da gravação, não capturas de tela do "
         "desktop. Todos os dados são de demonstração: HOME, Vault, agenda, comandos e cache de uso "
-        "sintéticos, e o Claude e o Codex são scripts falsos que respondem no formato real. Só os "
+        "sintéticos, e o Claude, o Codex e o OpenCode são scripts falsos que respondem no formato real. Só os "
         "números do painel SISTEMA (CPU, memória, disco) são da máquina que gravou.",
         "",
         f"**Revisão gravada:** `{rev}`{dirty}, em {date}. Para gravar de novo: "
@@ -568,17 +568,22 @@ def readme_fragment(meta: dict) -> str:
     ]
     for s in meta["scenes"]:
         lines += [f"![{s['caption']}](docs/telas/{s['name']}.png)", "", s["caption"], ""]
-    lines += [f"![Sessão inteira, animada: notas, Claude, Codex, ajuda, rolagem e /pasta.](docs/telas/{NAME}.gif)",
-              "", "Sessão inteira, animada: notas, Claude, Codex, ajuda, rolagem e /pasta.", "",
+    lines += [f"![Sessão inteira, animada: notas, Claude, Codex, OpenCode, ajuda, rolagem e /pasta.](docs/telas/{NAME}.gif)",
+              "", "Sessão inteira, animada: notas, Claude, Codex, OpenCode, ajuda, rolagem e /pasta.", "",
               f"A gravação crua fica em `docs/telas/{NAME}.cast` (asciinema v2), `{NAME}.pty.txt` "
               f"e `{NAME}.metadata.json` (revisão, duração, teclas enviadas e sha256 do código).", ""]
     return "\n".join(lines)
 
 
+# O contador de conversa do próprio HUD ("conversa 2k tokens") não é segredo;
+# qualquer outro "token" continua barrando a publicação.
+HUD_TOKEN_COUNTER = re.compile(r"\b\d+k tokens\b")
+
+
 def scan(paths: list[Path]) -> list[str]:
     hits = []
     for p in paths:
-        text = p.read_bytes().decode("utf-8", "replace")
+        text = HUD_TOKEN_COUNTER.sub("", p.read_bytes().decode("utf-8", "replace"))
         for pat in FORBIDDEN:
             for m in re.finditer(re.escape(pat), text, re.IGNORECASE):
                 ctx = text[max(0, m.start() - 30):m.end() + 30].replace("\n", "\\n")
