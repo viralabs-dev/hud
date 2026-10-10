@@ -32,7 +32,9 @@ SECRETS = ("~/.ssh/**", "~/.gnupg/**", "~/.claude/.credentials.json", "~/.claude
            "~/.config/gh/**", "~/.kube/**", "~/.docker/config.json", "~/.netrc", "~/.pgpass",
            "~/.password-store/**", "~/.local/share/keyrings/**", "~/.mozilla/**",
            "~/.config/google-chrome/**", "**/.env", "**/.env.*", "**/*.pem", "**/*.key",
-           "**/id_rsa*", "**/id_ed25519*")
+           "**/id_rsa*", "**/id_ed25519*",
+           # Os mesmos nomes que o perfil leitura do OpenCode nega (hud/opencode.py).
+           "**/*credentials*", "**/*secret*", "**/.npmrc", "**/.pypirc")
 # No Windows, também o cofre de credenciais e as chaves DPAPI do perfil.
 WINDOWS_SECRETS = ("~/AppData/Roaming/Microsoft/Credentials/**",
                    "~/AppData/Local/Microsoft/Credentials/**",

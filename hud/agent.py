@@ -166,6 +166,7 @@ class Agent:
             timer.cancel()
             drain.join(timeout=2)
             proc.stdout.close()
+            proc.stderr.close()
             with self._lock:
                 self.proc = None
         dur = time.monotonic() - self.started

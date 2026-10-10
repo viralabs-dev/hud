@@ -587,6 +587,13 @@ nunca lê seu token OAuth.
 - **Texto de fora é limpo.** Saída de comando, notas do Vault e o que você digita
   perdem sequências de escape (título, clipboard OSC 52, cursor), controles C0/C1
   e caracteres bidi antes de chegar à tela.
+- **Perfil leitura não é isolamento.** O Claude lê só as pastas permitidas; o
+  OpenCode recusa escrever, rodar comandos e sair da pasta, mas lê a pasta toda
+  fora dos segredos por nome; o Codex em sandbox read-only lê o disco todo (e,
+  no HUD, roda sem os servidores MCP do seu `~/.codex`). Em todos, o que o agente
+  lê vai para o provedor do modelo. Detalhes, por agente e com o código, em
+  [`docs/privacidade-agentes.md`](docs/privacidade-agentes.md); para conferir de
+  verdade: `python3 -I scripts/verificar-leitura.py --real`.
 - **O Vault é só leitura, com uma exceção pedida por você.** A varredura não segue
   links e pula notas acima de 2 MB. O HUD só escreve na pasta com `/doc salvar`:
   arquivos `.md` propostos por um agente, dentro da pasta, sem seguir link e com

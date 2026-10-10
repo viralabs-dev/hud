@@ -35,6 +35,8 @@ def build_argv(cfg: CodexConfig, thread_id: str = "", profile: str | None = None
     if profile != "completo":
         # Vale para exec e para resume (resume não aceita -s).
         argv += ["-c", 'sandbox_mode="read-only"']
+        # Os servidores MCP do ~/.codex rodam fora do sandbox: no perfil leitura, nenhum.
+        argv += ["-c", "mcp_servers={}"]
     if cfg.model:
         argv += ["-m", cfg.model]
     return argv + ["-"]  # prompt pela entrada padrão

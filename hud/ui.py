@@ -1957,11 +1957,17 @@ class Hud:
         if want == "completo":
             what = {"claude": "ferramentas, MCP, skills e comandos / do seu Claude Code, permission-mode "
                               f"{getattr(agent.cfg, 'full_permission_mode', '')}",
-                    "codex": "sandbox e aprovações do seu ~/.codex/config.toml",
+                    "codex": "sandbox, aprovações e MCP do seu ~/.codex/config.toml",
                     "opencode": "permissões do seu opencode.json"}.get(name, "configuração do seu terminal")
             self.say(f"⚠ {name} no perfil completo: {what}. Nova conversa.", "warn")
         else:
             self.say(f"{name} no perfil leitura. Nova conversa.", name)
+        # O que o perfil leitura NÃO garante (docs/privacidade-agentes.md).
+        limite = {"codex": "o sandbox read-only não prende a leitura: o Codex lê o disco todo",
+                  "opencode": "lê a pasta toda fora dos segredos por nome",
+                  "claude": "lê só as pastas permitidas, com segredos negados"}.get(name)
+        if limite:
+            self.say(f"  {limite}; o que ele lê vai para o provedor do modelo · docs/privacidade-agentes.md", "dim")
 
     def run_by_name(self, arg: str) -> None:
         if not arg:
