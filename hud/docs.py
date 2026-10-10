@@ -31,6 +31,12 @@ _FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})hud-doc(?:[ \t]+(.*))?$")
 _ATTR = re.compile(r"""(\w+)=("[^"]*"|'[^']*'|\S+)""")
 # Além de ":" e "\", o que o Windows não aceita em nome de arquivo.
 _BAD_CHARS = set('\\:<>"|?*')
+# Gravação por descritor de pasta (mkdirat/openat/renameat): Linux e macOS.
+DIR_FD = (not plat.WINDOWS and os.open in os.supports_dir_fd and os.mkdir in os.supports_dir_fd
+          and os.rename in os.supports_dir_fd and os.unlink in os.supports_dir_fd
+          and os.stat in os.supports_dir_fd and os.stat in os.supports_follow_symlinks
+          and hasattr(os, "fchmod"))
+O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _RESERVED = {"CON", "PRN", "AUX", "NUL"} | {f"{p}{n}" for p in ("COM", "LPT") for n in range(1, 10)}
 
 
@@ -279,7 +285,7 @@ def plan(root: Path, proposals: list[DocProposal]) -> tuple[list[str], list[str]
 
 
 def _mkdirs(root: Path, real_root: str, parts: list[str]) -> Path:
-    """Cria as pastas que faltam (755), conferindo cada nível."""
+    """Cria as pastas que faltam (755), conferindo cada nível pelo caminho (sem dir_fd)."""
     cur = root
     for part in parts:
         cur = cur / part
@@ -297,34 +303,182 @@ def _mkdirs(root: Path, real_root: str, parts: list[str]) -> Path:
     return cur
 
 
-def _write(dest: Path, data: bytes) -> None:
+def _antes_de_escrever(dest: Path) -> None:
+    """Entre a criação das pastas e a escrita de uma nota. Não faz nada: é o
+    ponto em que os testes trocam uma pasta por um link, de forma determinística."""
+
+
+def _folder_inside(folder: Path, real_root: str) -> bool:
+    return not plat.is_link(folder) and folder.is_dir() and _inside(folder, real_root)
+
+
+def _write(dest: Path, data: bytes, real_root: str) -> None:
+    """Gravação pelo caminho (Windows, ou sem dir_fd): estreita a janela, sem garantia.
+
+    Confere que a pasta continua dentro da raiz antes de abrir o temporário,
+    logo antes e logo depois do `os.replace`. Uma pasta trocada por link ou
+    junção entre essas conferências ainda passa (ADR-HUD-013).
+    """
+    folder = dest.parent
+    if not _folder_inside(folder, real_root):
+        raise DocError(f"{folder} virou link ou saiu da pasta do HUD")
     tmp = dest.with_name(f".{dest.name}.{secrets.token_hex(4)}.tmp")
     fd = plat.open_nofollow(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | plat.O_CLOEXEC
                             | plat.O_BINARY, 0o644)
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
             if not plat.WINDOWS:  # no Windows o modo só liga e desliga somente-leitura
                 os.fchmod(fh.fileno(), 0o644)
         if plat.is_link(dest) or (os.path.lexists(dest) and not os.path.isfile(dest)):
             raise DocError(f"{dest} virou link ou deixou de ser arquivo comum")
+        if not _folder_inside(folder, real_root):
+            raise DocError(f"{folder} virou link ou saiu da pasta do HUD")
         os.replace(tmp, dest)
     except BaseException:
-        tmp.unlink(missing_ok=True)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    if not _inside(folder, real_root):
+        try:
+            os.unlink(dest)
+        except OSError:
+            pass
+        raise DocError(f"{folder} saiu da pasta do HUD durante a gravação; {dest.name} apagado")
+
+
+# ------------------------------------------------- gravação por descritor (POSIX)
+
+def _open_dir(name, dir_fd: int | None = None) -> int:
+    """Abre uma pasta sem seguir link e confere pelo fstat que é pasta."""
+    flags = os.O_RDONLY | O_DIRECTORY | plat.O_CLOEXEC
+    if dir_fd is None:
+        fd = plat.open_nofollow(name, flags)
+    else:
+        fd = os.open(name, flags | plat.O_NOFOLLOW, dir_fd=dir_fd)
+    try:
+        if not stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise DocError(f"{name} não é pasta")
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _mkdirs_fd(top: int, parts: list[str], fds: list[int]) -> None:
+    """Cria e abre cada nível relativo ao anterior (mkdirat/openat com O_NOFOLLOW).
+
+    Os descritores abertos vão para `fds` (quem chama fecha), começando pela raiz.
+    """
+    cur = top
+    for part in parts:
+        try:
+            os.mkdir(part, 0o755, dir_fd=cur)
+            created = True
+        except FileExistsError:
+            created = False
+        try:
+            fd = _open_dir(part, dir_fd=cur)
+        except OSError as e:  # ELOOP/ENOTDIR: virou link ou não é pasta
+            raise DocError(f"{part} virou link ou deixou de ser pasta: {e}") from None
+        fds.append(fd)
+        if created:
+            os.fchmod(fd, 0o755)  # 755 mesmo com umask 077: é documentação do projeto
+        cur = fd
+
+
+def _same_chain(fds: list[int], parts: list[str]) -> bool:
+    """Cada pasta aberta ainda é a que está no caminho, sem link no meio."""
+    for parent, fd, part in zip(fds, fds[1:], parts):
+        try:
+            st = os.stat(part, dir_fd=parent, follow_symlinks=False)
+        except OSError:
+            return False
+        aberto = os.fstat(fd)
+        if not stat.S_ISDIR(st.st_mode) or (st.st_dev, st.st_ino) != (aberto.st_dev, aberto.st_ino):
+            return False
+    return True
+
+
+def _write_fd(fds: list[int], parts: list[str], name: str, data: bytes) -> None:
+    """Temporário e `os.replace` relativos à pasta já aberta: nada cai fora da raiz."""
+    folder = fds[-1]
+    tmp = f".{name}.{secrets.token_hex(4)}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | plat.O_NOFOLLOW | plat.O_CLOEXEC,
+                 0o644, dir_fd=folder)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+            os.fchmod(fh.fileno(), 0o644)
+        if not _same_chain(fds, parts):
+            raise DocError(f"{'/'.join(parts)}: uma pasta virou link ou foi trocada durante a gravação")
+        try:
+            st = os.stat(name, dir_fd=folder, follow_symlinks=False)
+        except FileNotFoundError:
+            st = None
+        if st is not None and not stat.S_ISREG(st.st_mode):
+            raise DocError(f"{name} virou link ou deixou de ser arquivo comum")
+        os.replace(tmp, name, src_dir_fd=folder, dst_dir_fd=folder)
+    except BaseException:
+        try:
+            os.unlink(tmp, dir_fd=folder)
+        except OSError:
+            pass
         raise
 
 
+def _save_fd(root: Path, props: list[DocProposal]) -> list[str]:
+    try:
+        top = _open_dir(root)
+    except OSError as e:
+        raise DocError(f"{root} virou link ou deixou de ser pasta: {e}") from None
+    out = []
+    try:
+        for p in props:
+            parts = p.arquivo.split("/")
+            fds = [top]
+            try:
+                _mkdirs_fd(top, parts[:-1], fds)
+                _antes_de_escrever(root / p.arquivo)
+                _write_fd(fds, parts[:-1], parts[-1], p.conteudo.encode("utf-8"))
+            except OSError as e:
+                raise DocError(f"{p.arquivo}: {e}") from None
+            finally:
+                for fd in fds[1:]:
+                    os.close(fd)
+            out.append(p.arquivo)
+    finally:
+        os.close(top)
+    return out
+
+
 def save_docs(root: Path, proposals: list[DocProposal], sobrescrever: bool = False) -> list[str]:
-    """Grava as notas na pasta do HUD; confere tudo antes de escrever qualquer uma."""
+    """Grava as notas na pasta do HUD; confere tudo antes de escrever qualquer uma.
+
+    Com dir_fd (Linux, macOS) cada pasta é criada e aberta relativa à anterior e
+    o temporário e o `os.replace` são relativos à pasta aberta, então trocar uma
+    pasta por link no meio não leva a escrita para fora. Sem dir_fd (Windows) a
+    gravação é pelo caminho, com conferências antes e depois (sem garantia).
+    """
     root = Path(root)
     _novos, existentes = plan(root, proposals)
     if existentes and not sobrescrever:
         raise AlreadyExists(existentes)
     real_root = _check_root(root)
+    props = _unique(proposals)
+    if DIR_FD:
+        return _save_fd(root, props)
     out = []
-    for p in _unique(proposals):
+    for p in props:
         parts = p.arquivo.split("/")
         folder = _mkdirs(root, real_root, parts[:-1])
-        _write(folder / parts[-1], p.conteudo.encode("utf-8"))
+        _antes_de_escrever(root / p.arquivo)
+        _write(folder / parts[-1], p.conteudo.encode("utf-8"), real_root)
         out.append(p.arquivo)
     return out
