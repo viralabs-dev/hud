@@ -83,6 +83,8 @@ for ev in (
       if "PROPOSTA" in data and "DOCPROPOSTA" not in data else []),
     *([{"type": "assistant", "message": {"content": [{"type": "text", "text": DOCS_JSON}]}}]
       if "DOCPROPOSTA" in data else []),
+    *([{"type": "assistant", "message": {"content": [{"type": "text", "text": CMDS_JSON}]}}]
+      if "CMDPROPOSTA" in data else []),
     {"type": "result", "subtype": "success", "is_error": False, "session_id": "s1",
      "total_cost_usd": 0.01},
 ):
@@ -124,6 +126,32 @@ nunca
 ````
 
 Digite /doc salvar para gravar."""
+
+# O que o agente responde quando segue a skill hud-comandos dentro do HUD.
+CMDS_TEXTO = """Troquei o painel:
+
+```hud-comandos
+[[command]]
+name = "Eco novo"
+argv = ["echo", "eco-novo"]
+
+[[command]]
+name = "Eco"
+argv = ["echo", "ola-do-eco"]
+```
+
+Digite /proposta para ver a prévia."""
+
+LAYOUT_BLOCOS = """nome = "blocos"
+[[coluna]]
+paineis = ["sistema", "comandos"]
+[[coluna]]
+paineis = ["saida"]
+[[bloco]]
+id = "sistema"
+titulo = "MAQUINA"
+mostrar = ["cpu", "mem"]
+"""
 
 LAYOUT_ECO = """nome = "eco"
 descricao = "Painel de comando para testar a confiança"
@@ -283,7 +311,8 @@ class UiTest(unittest.TestCase):
             exe = bindir / name
             exe.write_text(src.replace("LOG", json.dumps(str(log)))
                            .replace("PROPOSTA_JSON", json.dumps(PROPOSTA_TEXTO))
-                           .replace("DOCS_JSON", json.dumps(DOCS_TEXTO)), encoding="utf-8")
+                           .replace("DOCS_JSON", json.dumps(DOCS_TEXTO))
+                           .replace("CMDS_JSON", json.dumps(CMDS_TEXTO)), encoding="utf-8")
             os.chmod(exe, 0o700)
         cls.claude_exe, cls.codex_exe = bindir / "claude", bindir / "codex"
         cls.opencode_exe = bindir / "opencode"
@@ -527,14 +556,25 @@ executable = {q(str(self.opencode_exe))}
         self.hud.send(ALT[2])
         self.hud.type("me faça uma PROPOSTA")
         self.hud.wait_for("proposta de customização")
-        self.hud.type("/custom salvar")
+        self.addCleanup(shutil.rmtree, self.custom / "proposta", ignore_errors=True)
+        # Prévia: a tela já mostra o layout proposto, mas nada é gravado antes do "s".
+        self.hud.type("/proposta")
+        self.hud.wait_for("gravar e usar “proposta”")
+        self.hud.wait_for(lambda s: "AGENDA" not in s.text(), what="prévia do layout")
+        self.assertFalse((self.custom / "proposta").exists())
+        self.hud.send("n")  # recusa: volta ao layout de antes, sem gravar
+        self.hud.wait_for("AGENDA")
+        self.assertFalse((self.custom / "proposta").exists())
+        self.hud.type("/custom salvar")  # mesmo caminho pelo /custom
+        self.hud.wait_for("gravar e usar “proposta”")
+        self.hud.send("s")
         self.hud.wait_for("customização proposta gravada")
         layout = self.custom / "proposta" / "layout.toml"
         self.assertTrue(layout.is_file())
         self.assertEqual(stat.S_IMODE(layout.stat().st_mode), 0o644)
-        self.hud.type("/custom proposta")
-        self.hud.wait_for(lambda s: "AGENDA" not in s.text() and "SAÍDA" in s.text(), what="layout da proposta")
-        shutil.rmtree(self.custom / "proposta")
+        self.hud.wait_for(lambda s: "AGENDA" not in s.text() and "SAÍDA" in s.text(), what="layout em uso")
+        self.hud.type("/custom padrao")
+        self.hud.wait_for("AGENDA")
 
     def test_13_abas_da_saida(self):
         s = self.hud.screen
@@ -697,6 +737,82 @@ executable = {q(str(self.opencode_exe))}
         self.hud.send("\x15")
         self.hud.wait_for("escreva uma nota")
 
+    def test_20_foco_e_enfase(self):
+        s = self.hud.screen
+        self.hud.wait_for("SISTEMA")
+        self.hud.send("\x1b[1;3A")  # Alt+↑: sem foco, começa pela SAÍDA
+        self.hud.send("\x1bz")  # Alt+Z: ênfase na caixa em foco
+        self.hud.wait_for("Alt+Z volta")
+        self.assertNotIn("SISTEMA", s.text())
+        self.assertIn("1 NOTAS", s.text())
+        self.hud.send("\x1bz")
+        self.hud.wait_for("SISTEMA")
+        self.hud.send("\x1b[1;3A")  # Alt+↑ a partir da SAÍDA: a caixa de cima (VAULT)
+        self.hud.send("\x1bz")
+        self.hud.wait_for(lambda s: "Alt+Z volta" in s.text() and "VAULT" in s.text() and "SAÍDA" not in s.text(),
+                          what="ênfase no VAULT")
+        self.hud.send("\x1bz")
+        self.hud.wait_for("SISTEMA")
+        # Clique numa caixa também dá o foco.
+        self.hud.wait_for("CPU")
+        row, col = s.find("CPU")
+        self.hud.send(f"\x1b[<0;{col + 1};{row + 1}M\x1b[<0;{col + 1};{row + 1}m".encode())
+        self.hud.send("\x1bz")
+        self.hud.wait_for(lambda s: "Alt+Z volta" in s.text() and "SISTEMA" in s.text() and "AGENDA" not in s.text(),
+                          what="ênfase no SISTEMA")
+        self.hud.send("\x1b")  # Esc com a entrada vazia sai da ênfase
+        self.hud.wait_for("AGENDA")
+
+    def test_21_arrastar_caixa(self):
+        s = self.hud.screen
+        self.addCleanup(shutil.rmtree, self.custom / "pessoal", ignore_errors=True)
+        self.hud.wait_for("AGENDA")
+        trow, tcol = s.find("SISTEMA")  # título da caixa: onde o arraste começa
+        vrow, vcol = s.find("VAULT")
+        drop_row = vrow + 6  # no meio da caixa do VAULT: troca as duas
+        self.hud.send(f"\x1b[<0;{tcol + 1};{trow + 1}M".encode())
+        time.sleep(0.3)  # como na mão: apertar e soltar juntos viram um clique só no ncurses
+        self.hud.send(f"\x1b[<0;{vcol + 10};{drop_row + 1}m".encode())
+        self.hud.wait_for("caixa sistema movida")
+        layout = (self.custom / "pessoal" / "layout.toml").read_text(encoding="utf-8")
+        self.assertIn("sistema", layout)
+        nrow, ncol = s.find("SISTEMA")
+        self.assertGreater(ncol, tcol)  # o SISTEMA foi para a coluna da direita
+        self.hud.type("/custom padrao")
+        self.hud.wait_for(lambda s: s.find("SISTEMA") and s.find("SISTEMA")[1] < 10, what="layout padrão de volta")
+
+    def test_22_comandos_com_previa(self):
+        s = self.hud.screen
+        cmds_file = self.config.parent / "comandos.toml"
+        self.addCleanup(lambda: cmds_file.unlink(missing_ok=True))
+        self.hud.send(ALT[2])
+        self.hud.type("troque os comandos CMDPROPOSTA")
+        self.hud.wait_for("proposta de comandos: 2 comando(s)")
+        self.hud.type("/proposta")
+        self.hud.wait_for("COMANDOS · prévia")
+        self.assertIn("+ ", s.text())
+        self.assertFalse(cmds_file.exists())  # nada gravado antes do "s"
+        self.hud.send("s")
+        self.hud.wait_for("comando(s) gravados")
+        self.assertIn("Eco novo", cmds_file.read_text(encoding="utf-8"))
+        self.assertEqual(stat.S_IMODE(cmds_file.stat().st_mode), 0o600)  # teste de tela: só POSIX
+        self.hud.wait_for("F1  Eco novo")
+        self.hud.type("/cmd")
+        self.hud.wait_for("fonte: comandos.toml")
+
+    def test_23_bloco_com_titulo_e_mostrar(self):
+        s = self.hud.screen
+        d = self.custom / "blocos"
+        d.mkdir(exist_ok=True)
+        (d / "layout.toml").write_text(LAYOUT_BLOCOS, encoding="utf-8")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        self.hud.type("/custom blocos")
+        self.hud.wait_for(lambda s: "MAQUINA" in s.text() and "LOAD" not in s.text(), what="bloco só com CPU e MEM")
+        self.assertIn("CPU", s.text())
+        self.assertIn("MEM", s.text())
+        self.hud.type("/custom padrao")
+        self.hud.wait_for("AGENDA")
+
     def test_08_roda_do_mouse_rola_a_saida(self):
         self.hud.type("/ajuda")
         self.hud.wait_for("Segurança")
@@ -810,6 +926,8 @@ class RawMouseTest(unittest.TestCase):
         hud = SimpleNamespace(scroll=scroll, scr=self.Scr(rest), clicks=[])
         hud.wheel = lambda b, *a: Hud.wheel(hud, b, *a)
         hud.click = lambda row, col: hud.clicks.append((row, col))
+        hud.releases = []
+        hud.release = lambda row, col: hud.releases.append((row, col))
         with mock.patch("curses.unget_wch", create=True) as unget:
             Hud.raw_mouse(hud)
         self.clicks = hud.clicks
@@ -826,7 +944,7 @@ class RawMouseTest(unittest.TestCase):
         self.assertEqual(self.clicks, [(4, 9)])
         self.assertEqual(self.run_seq("M" + chr(32) + chr(33 + 9) + chr(33 + 4))[0], 0)
         self.assertEqual(self.clicks, [(4, 9)])
-        # Soltura (m) não faz nada.
+        # Soltura (m) não clica: vira "soltar" (fim de um arraste), em (linha, coluna).
         self.assertEqual(self.run_seq("<0;10;5m")[0], 0)
         self.assertEqual(self.clicks, [])
         self.assertEqual(self.run_seq("<64;10;10m")[0], 0)

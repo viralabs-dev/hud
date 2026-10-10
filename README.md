@@ -411,6 +411,27 @@ e `monitor` (três colunas, syslog e portas). `/custom lista` mostra todos;
 `/custom foco` usa; `/custom padrao` volta. Fora do HUD, `hud --custom-check
 <nome>` valida uma pasta.
 
+**Cada bloco do jeito que você quer.** Um `[[bloco]]` no `layout.toml` muda o
+título de um painel embutido e o que ele mostra:
+
+```toml
+[[bloco]]
+id = "sistema"
+titulo = "MÁQUINA"
+mostrar = ["cpu", "mem", "disco", "rede"]   # sistema: cpu, historico, mem, swap, disco, load, rede, sensores
+
+[[bloco]]
+id = "vault"
+mostrar = ["quadros", "atencao"]            # vault: resumo, quadros, atencao, recentes
+
+[[bloco]]
+id = "agenda"
+dias = 7                                    # só os próximos 7 dias
+```
+
+Peça ao agente (skill `hud-custom`): a proposta aparece numa **prévia** na própria
+tela (`/proposta` ou `/custom salvar`) e só é gravada e usada com `s`.
+
 Os modelos vêm dentro do binário e do pacote do pipx, só para leitura. As suas
 customizações ficam em `~/.local/share/hud/custom/` (Linux e macOS) ou
 `%LOCALAPPDATA%\hud\custom\` (Windows); rodando do repositório, em `custom/`.
@@ -442,6 +463,49 @@ agente responde com a proposta (blocos `hud-custom`), sem gravar nada; você
 grava com `/custom salvar` e usa com `/custom <nome>`. Fora do HUD, o agente
 grava direto na pasta das customizações. A pasta `custom/` vai para um repositório
 público: nada de credencial, token ou caminho pessoal num `layout.toml`.
+
+## Caixas: foco, ênfase e arraste
+
+- **Foco:** Alt+setas movem o foco entre as caixas, e um clique numa caixa também
+  a foca. A caixa em foco fica com a borda em destaque.
+- **Ênfase:** Alt+Z faz a caixa em foco ocupar a área toda; Alt+Z de novo, ou Esc
+  com a entrada vazia, volta.
+- **Arraste:** pressione no título de uma caixa e solte sobre outra para trocar as
+  duas de lugar. Solte na parte de cima ou de baixo de uma caixa para encaixar
+  antes ou depois dela, ou na última coluna da tela para abrir uma coluna nova. O
+  resultado vira uma customização sua (`pessoal`, ou a que estiver em uso),
+  gravada e lembrada; `/custom padrao` volta ao original.
+
+## Agentes rodando
+
+`/agentes` (ou Alt+5) mostra, na área toda, os agentes rodando na máquina e as
+sessões recentes com os subagentes de cada uma:
+
+- **PROCESSOS:** `claude`, `codex` e `opencode` em execução, com o modo
+  (interativo, headless ou servidor), a pasta, há quanto tempo e a CPU. Os que o
+  próprio HUD lançou têm um `●`.
+- **SESSÕES:** as conversas da última hora, as ativas primeiro, com os subagentes
+  embaixo: rodando (com a animação) ou concluídos.
+
+As sessões vêm das transcrições locais (Claude Code: `~/.claude/projects`; Codex:
+`~/.codex/sessions`; OpenCode: o banco local, aberto só para leitura). O HUD lê
+só o fim de cada arquivo e mostra só títulos, pastas e descrições de subagentes;
+o conteúdo das conversas nunca aparece. O painel também pode entrar num layout
+(`agentes`). No Windows, a lista de processos fica vazia, e as sessões aparecem.
+
+## Comandos do painel
+
+Os comandos F1–F10 podem ficar num arquivo próprio, `comandos.toml`, ao lado do
+`config.toml` (com o mesmo `[[command]]`). Se ele existir, vale no lugar dos
+comandos do `config.toml`. `/cmd` mostra os comandos, de onde vêm e onde fica o
+arquivo; `/cmd recarregar` relê depois de editar à mão.
+
+O jeito fácil é pedir a um agente: a skill `hud-comandos` (instalada com
+`hud --instalar-skill`) ensina o Claude e o Codex a montar o arquivo com as
+regras de segurança do HUD. Dentro do HUD, o agente responde com um bloco
+`hud-comandos`, e `/proposta` mostra a **prévia** no próprio painel COMANDOS
+(`+` entra, `-` sai, `~` muda) e os comandos recusados. Só o `s` grava (600,
+atômico); qualquer outra tecla descarta.
 
 ## Claude Code, Codex e OpenCode
 

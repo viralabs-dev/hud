@@ -1,3 +1,3 @@
 """HUD de terminal: sistema, comandos permitidos, agenda, entrada/saída e Vault."""
 
-__version__ = "0.14.0"
+__version__ = "0.15.0"

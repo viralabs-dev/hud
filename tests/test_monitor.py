@@ -159,7 +159,7 @@ class ClaudeSessionsTest(unittest.TestCase):
         self.proj = self.home / ".claude" / "projects" / "-w-proj"
 
     def session(self, sid="s1", mtime=NOW - 10, extra=""):
-        t = NOW - 600
+        t = NOW - 150
         recs = [
             {"type": "mode", "sessionId": sid},
             {"type": "user", "isMeta": True, "cwd": "/w/proj", "sessionId": sid,
@@ -214,7 +214,7 @@ class ClaudeSessionsTest(unittest.TestCase):
         self.assertTrue(subs["Lane longa"].rodando)
         self.assertEqual(subs["Ler o código"].tipo, "Explore")
         self.assertEqual(s.subagentes[0].descricao, "Lane longa")  # rodando primeiro
-        self.assertAlmostEqual(subs["Rodar testes"].desde, NOW - 599, delta=1)
+        self.assertAlmostEqual(subs["Rodar testes"].desde, NOW - 149, delta=1)
         self.assertNotIn(SECRET, repr(out))
 
     def test_first_user_text_when_no_title(self):
@@ -487,3 +487,17 @@ class SnapshotWatcherTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NotificacaoEmbutidaTest(unittest.TestCase):
+    def test_aviso_dentro_de_resultado_de_ferramenta(self):
+        import json
+        from hud import monitor as m
+        aviso = ("<task-notification>\\n<task-id>x</task-id>\\n<tool-use-id>toolu_ABC</tool-use-id>\\n"
+                 "<status>completed</status>\\n</task-notification>")
+        linha = json.dumps({"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "outro", "content": "saída qualquer " + aviso}]}})
+        finished: set[str] = set()
+        for blk in m._NOTIF_BLOCK.finditer(linha):
+            m._notif(blk.group(0), finished)
+        self.assertEqual(finished, {"toolu_ABC"})

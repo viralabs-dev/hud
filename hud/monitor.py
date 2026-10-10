@@ -59,7 +59,7 @@ MAX_FILES = 200            # arquivos abertos por varredura
 MAX_ENTRIES = 5000         # entradas de pasta olhadas por fonte
 MAX_SESSIONS = 60
 MAX_SUBS = 20              # subagentes por sessão
-SUB_STALE_S = 600          # subagente sem atividade há mais que isso não está rodando
+SUB_STALE_S = 180          # subagente sem atividade há mais que isso não está rodando
 CODEX_DAYS = 7             # pastas AAAA/MM/DD do Codex olhadas
 TITLE_MAX = 80
 DESC_MAX = 120
@@ -67,6 +67,7 @@ PS = "/bin/ps"
 _PS_ENV = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"}
 _DONE = re.compile(r"<tool-use-id>([^<]{1,200})</tool-use-id>")
 _STATUS = re.compile(r"<status>([^<]{1,40})</status>")
+_NOTIF_BLOCK = re.compile(r"<task-notification>.{0,4000}?</task-notification>", re.S)
 _SUFFIX = re.compile(r"\s*\(@([\w.-]{1,60}) subagent\)\s*$")
 
 
@@ -526,6 +527,12 @@ def _parse_claude(path, sub_files, budget, now, janela_s):
     first_user = ""
     launched: dict[str, tuple[str, str, float]] = {}
     finished: set[str] = set()
+    # O aviso de fim de um subagente pode chegar em qualquer registro (fila, mensagem
+    # do usuário ou dentro do resultado de uma ferramenta): procura no texto cru.
+    for line in lines:
+        if b"<task-notification" in line:
+            for blk in _NOTIF_BLOCK.finditer(line.decode("utf-8", "replace")):
+                _notif(blk.group(0), finished)
     for o in _records(lines):
         t = o.get("type")
         if not cwd and isinstance(o.get("cwd"), str) and not o.get("isSidechain"):

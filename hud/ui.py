@@ -23,10 +23,13 @@ from pathlib import Path
 from . import agenda as ag
 from . import plataforma as plat
 from .config import Command, Config, ConfigError, remember_folder, validate_folder
+from . import config as cfgmod
 from .metrics import Metrics, human_bytes, human_duration
 from . import custom as cu
+from . import comandos as cmdx
 from . import docs as dc
 from . import markdown as md
+from . import monitor as mon
 from . import skills as sk
 from . import layout as lay
 from . import usage as us
@@ -45,7 +48,11 @@ MAX_INPUT = 500
 WHEEL_UP = getattr(curses, "BUTTON4_PRESSED", 0)
 WHEEL_DOWN = getattr(curses, "BUTTON5_PRESSED", 0x200000)
 WHEEL_STEP = 3
-CLICK = getattr(curses, "BUTTON1_PRESSED", 0) | getattr(curses, "BUTTON1_CLICKED", 0)
+PRESS = getattr(curses, "BUTTON1_PRESSED", 0)
+RELEASE = getattr(curses, "BUTTON1_RELEASED", 0)
+CLICK = PRESS | getattr(curses, "BUTTON1_CLICKED", 0)
+# Alt+setas movem o foco entre as caixas (nomes do terminfo para Alt = modificador 3).
+FOCUS_KEYS = {"kUP3": "up", "kDN3": "down", "kLFT3": "left", "kRIT3": "right"}
 MODE_KEYS = {"1": "notas", "2": "claude", "3": "codex", "4": "opencode"}  # Alt+1/2/3/4
 TABS = tuple(MODE_KEYS.values())  # cada modo tem a sua aba na SAÍDA
 # PDCurses manda Alt+N como uma tecla só (ALT_1...); o ncurses manda Esc + N.
@@ -63,7 +70,10 @@ SLASH = [
     ("/project", "lista ou cria projetos"), ("/r", "roda um comando do painel"),
     ("/rm", "apaga um item da agenda"), ("/sair", "fecha o HUD"), ("/skill", "usa uma skill pelo nome"),
     ("/skills", "lista as skills"), ("/vault", "relê a pasta agora"), ("/x", "pergunta ao Codex"),
+    ("/agentes", "agentes e subagentes rodando (Alt+5)"), ("/cmd", "comandos do painel e onde editar"),
+    ("/proposta", "prévia do que um agente propôs (s aplica)"),
 ]
+SLASH.sort()
 
 HELP = """\
 Teclas
@@ -72,6 +82,10 @@ Teclas
   A SAÍDA tem uma aba por modo; ● = aba com saída nova ainda não vista
   Enter · envia a linha · ↑/↓ · histórico · Esc · limpa a linha
   / mostra os comandos na borda da entrada · Tab completa o comando (fora disso, alterna o modo)
+Caixas
+  Alt+setas · move o foco entre as caixas (ou clique numa caixa) · Alt+Z · ênfase: a caixa em foco na área toda
+  arraste o título de uma caixa e solte sobre outra · troca as duas (vira a sua customização, lembrada)
+  Alt+5 ou /agentes · os agentes e subagentes rodando (Claude, Codex, OpenCode) · Esc ou Alt+Z volta
   roda do mouse ou PgUp/PgDn · rola a aba aberta · Ctrl+L · redesenha · Ctrl+C · sai
 Entrada
   texto livre · vira nota com data e hora (notas.md, fora do Vault)
@@ -82,7 +96,8 @@ Entrada
   /notas [N] · últimas notas · /conflitos · conflitos de sync do Vault
   /vault · relê a pasta agora · /limpar · limpa a aba aberta · /sair
   /pasta caminho · lê outra pasta local no lugar do Vault (lembrada) · /pasta vault · volta ao Vault
-  /custom lista · customizações · /custom nome · usa · /custom padrao · volta · /custom salvar · grava a proposta do agente
+  /custom lista · customizações · /custom nome · usa · /custom padrao · volta · /custom salvar · prévia da proposta (s grava)
+  /cmd · comandos do painel e o arquivo deles · /proposta · prévia do que o agente propôs (comandos ou layout); s aplica
 Skills e projetos (com o agente do modo; nas notas, o Claude ou o Codex)
   /skills [filtro] · lista as skills do HUD, do Claude Code e do Codex · /skill nome [pedido] · usa uma skill
   /project · lista os projetos da pasta · /project pedido · cria um projeto novo no modelo do Vault, ou consulta
@@ -132,6 +147,15 @@ class Hud:
         self.cmd_last: dict[str, tuple[bool, str, float]] = {}  # comando → (ok, resumo, quando acabou)
         self.search_tab = "notas"
         self.tab_hits: list[tuple[int, int, int, str]] = []  # (linha, x0, x1, aba) para o clique
+        self.rects: dict[str, tuple[int, int, int, int]] = {}  # caixas da última tela (y, x, h, w)
+        self.current = ""  # caixa sendo desenhada (título do bloco, foco)
+        self.focus = ""  # caixa em foco (Alt+setas, clique)
+        self.emphasis = False  # a caixa em foco ocupa a área toda (Alt+Z)
+        self.drag = ""  # caixa sendo arrastada pelo título
+        self.monitor: mon.MonitorWatcher | None = None  # só liga quando o painel AGENTES aparece
+        self.cmd_proposal: cmdx.Proposta | None = None  # comandos propostos por um agente
+        self.cmd_preview: cmdx.Proposta | None = None   # em prévia no painel COMANDOS, esperando "s"
+        self.layout_before: tuple | None = None  # (layout, nome, feed) para voltar se a prévia for recusada
         self.inp = ""
         self.cur = 0
         self.history: list[str] = []
@@ -239,7 +263,7 @@ class Hud:
         # Só a roda importa. Com o mouse ligado o terminal passa os cliques
         # para o HUD; para selecionar texto, Shift+arrastar.
         try:
-            curses.mousemask(WHEEL_UP | WHEEL_DOWN | CLICK)
+            curses.mousemask(WHEEL_UP | WHEEL_DOWN | CLICK | RELEASE)
             curses.mouseinterval(0)
         except (curses.error, AttributeError):  # PDCurses/terminal sem mouse
             pass
@@ -258,6 +282,7 @@ class Hud:
             self.say(f"⚠ {w}", "warn")
         last_sample = 0.0
         last_vault = -1
+        last_mon = -1
         try:
             while not self.quit:
                 now = time.monotonic()
@@ -272,6 +297,9 @@ class Hud:
                     dirty = True
                 if self.vault.version != last_vault:
                     last_vault = self.vault.version
+                    dirty = True
+                if self.monitor and self.monitor.version != last_mon:
+                    last_mon = self.monitor.version
                     dirty = True
                 if dirty:
                     self.draw()
@@ -294,6 +322,8 @@ class Hud:
                 self.feed.stop()
             for agent in self.agents.values():
                 agent.stop()
+            if self.monitor:
+                self.monitor.stop()
 
     def _drain(self) -> bool:
         got = False
@@ -327,7 +357,13 @@ class Hud:
                 if found:
                     self.proposals = found
                     nomes = ", ".join(sorted({f"{p.nome}/{p.arquivo}" for p in found}))
-                    self.say(f"✦ proposta de customização: {nomes} · /custom salvar para gravar", "ok", ev[1])
+                    self.say(f"✦ proposta de customização: {nomes} · /proposta mostra a prévia", "ok", ev[1])
+                cp = cmdx.parse_proposals(ev[2])
+                if cp:
+                    self.cmd_proposal = cp
+                    extra = f" · {len(cp.avisos)} recusado(s)" if cp.avisos else ""
+                    self.say(f"✦ proposta de comandos: {len(cp.comandos)} comando(s){extra} · "
+                             "/proposta mostra a prévia", "ok", ev[1])
                 docs = dc.parse_doc_proposals(ev[2])
                 if docs:
                     for d in docs:
@@ -404,6 +440,7 @@ class Hud:
             "opencode": self.c.get("opencode", 0), "opencode_dim": self.c.get("opencode", 0) | A.A_DIM,
             # Markdown das respostas: código no texto padrão em negrito, para destacar da cor do agente.
             "code": A.A_BOLD, "codeline": A.A_NORMAL,
+            "focus": self.c.get("accent", 0) | A.A_BOLD,  # borda da caixa em foco
         }
         italic = getattr(A, "A_ITALIC", A.A_DIM)  # PDCurses pode não ter itálico
         self.style["text_dim"] = A.A_DIM
@@ -435,9 +472,22 @@ class Hud:
             pass  # escrever na última célula da tela sempre "falha"
         return x + width(s)
 
+    def shows(self, part: str) -> bool:
+        """[[bloco]] mostrar = [...] da caixa sendo desenhada (sem a lista, mostra tudo)."""
+        pid = "vault" if self.current == "pasta" else self.current
+        blk = self.layout.blocos.get(pid) if pid else None
+        return not blk or blk.mostrar is None or part in blk.mostrar
+
     def box(self, y: int, x: int, h: int, w: int, title: str, right: str = "",
             color: str | None = None) -> None:
-        b = self.style[color or "border"]
+        pid = self.current
+        blk = self.layout.blocos.get("vault" if pid == "pasta" else pid) if pid else None
+        if blk and blk.titulo:  # [[bloco]] titulo = "…"
+            title = blk.titulo
+        focused = bool(pid) and pid == self.focus
+        if focused and self.emphasis:
+            right = "Alt+Z volta · " + right if right else "Alt+Z volta"
+        b = self.style["focus"] if focused else self.style[color or "border"]
         self.put(y, x, "╭" + "─" * (w - 2) + "╮", b)
         for i in range(1, h - 1):
             self.put(y + i, x, "│", b)
@@ -478,9 +528,15 @@ class Hud:
         draw = {"sistema": self.draw_system, "comandos": self.draw_commands,
                 "agenda": self.draw_agenda, "uso_claude": self.draw_usage,
                 "uso_codex": self.draw_usage_codex, "vault": self.draw_vault,
-                "saida": self.draw_output}
+                "saida": self.draw_output, "agentes": self.draw_agents}
+        if self.emphasis and self.focus and (self.focus in rects or self.focus in draw):
+            rects = {self.focus: (0, 0, body, W)}  # ênfase: só a caixa em foco, na área toda
+        elif self.focus not in rects:
+            self.focus, self.emphasis = "", False
+        self.rects = rects
         for pid, (y, x, h, w) in rects.items():
             self.clip = (y, y + h, x + w)
+            self.current = pid
             try:
                 if pid in draw:
                     draw[pid](y, x, h, w)
@@ -488,6 +544,7 @@ class Hud:
                     self.draw_custom(pid, y, x, h, w)
             finally:
                 self.clip = None
+                self.current = ""
         cy, cx = self.draw_input(body, 0, 3, W)
         try:
             scr.move(cy, cx)
@@ -577,14 +634,24 @@ class Hud:
                 self.put(row, nx, f" {status}", "dim", x0 + iw - nx)
 
         # Linhas por prioridade (1 = sempre); entram as que couberem, na ordem da tela.
-        rows: list[tuple[int, object]] = [(1, lambda r, m=meters[0]: meter(r, *m)), (4, spark),
-                                          (1, lambda r, m=meters[1]: meter(r, *m))]
-        if s.swap_total:
+        rows: list[tuple[int, object]] = []
+        if self.shows("cpu"):
+            rows.append((1, lambda r, m=meters[0]: meter(r, *m)))
+        if self.shows("historico"):
+            rows.append((4, spark))
+        if self.shows("mem"):
+            rows.append((1, lambda r, m=meters[1]: meter(r, *m)))
+        if s.swap_total and self.shows("swap"):
             rows.append((3, lambda r, m=meters[2]: meter(r, *m)))
-        for k, d in enumerate(disks[:3]):
-            rows.append((2 if k == 0 else 5 + k, lambda r, d=d: meter(r, *d)))
-        rows += [(9, lambda r: None), (2, load), (2, net)]  # respiro entre medidores e texto, se couber
-        if s.temp is not None or s.battery:
+        if self.shows("disco"):
+            for k, d in enumerate(disks[:3]):
+                rows.append((2 if k == 0 else 5 + k, lambda r, d=d: meter(r, *d)))
+        rows.append((9, lambda r: None))  # respiro entre medidores e texto, se couber
+        if self.shows("load"):
+            rows.append((2, load))
+        if self.shows("rede"):
+            rows.append((2, net))
+        if (s.temp is not None or s.battery) and self.shows("sensores"):
             rows.append((3, sensors))
         room = h - 2
         keep = sorted(range(len(rows)), key=lambda k: (rows[k][0], k))[:room]
@@ -593,7 +660,89 @@ class Hud:
             rows[k][1](r)
             r += 1
 
+    def draw_agents(self, y: int, x: int, h: int, w: int) -> None:
+        """Os agentes rodando na máquina (processos) e as sessões recentes com os subagentes."""
+        if self.monitor is None:
+            self.monitor = mon.MonitorWatcher()
+            self.monitor.start()
+        snap = self.monitor.snapshot
+        ativas = sum(1 for se in snap.sessoes if se.ativa)
+        self.box(y, x, h, w, "AGENTES",
+                 f"{len(snap.processos)} processo(s) · {ativas} sessão(ões) ativa(s)" if snap.lido_em else "lendo…")
+        x0, iw, r, end = x + 2, w - 4, y + 1, y + h - 1
+        if not snap.lido_em:
+            self.put(r, x0, "lendo processos e sessões…", "dim", iw)
+            return
+        now = time.time()
+        home = str(Path.home())
+
+        def short(path: str) -> str:
+            path = clean_line(path or "")
+            return "~" + path[len(home):] if path.startswith(home) else path
+
+        def color(agente: str) -> str:
+            return agente if agente in ("claude", "codex", "opencode") else "text"
+
+        if self.shows("processos") and r < end:
+            self.put(r, x0, "PROCESSOS", "head")
+            r += 1
+            if not snap.processos:
+                msg = "sem leitura de processos no Windows" if plat.WINDOWS else "nenhum agente rodando"
+                self.put(r, x0, msg, "dim", iw)
+                r += 1
+            for pr in snap.processos:
+                if r >= end:
+                    break
+                cpu = f"{pr.cpu:.0f}%" if pr.cpu is not None else ""
+                age = human_duration(now - pr.desde) if pr.desde else ""
+                tail = "  ".join(t for t in (age, cpu) if t)
+                nx = self.put(r, x0, "● " if pr.do_hud else "  ", "ok")
+                nx = self.put(r, nx, f"{pr.agente:<9}", color(pr.agente))
+                nx = self.put(r, nx, f"{pr.modo:<11}", "dim")
+                self.put(r, nx, short(pr.cwd), "text", x0 + iw - nx - width(tail) - 1)
+                self.put(r, x0 + iw - width(tail), tail, "dim")
+                r += 1
+            r += 1
+        if self.shows("sessoes") and r < end:
+            self.put(r, x0, "SESSÕES", "head")
+            r += 1
+            sessoes = sorted(snap.sessoes, key=lambda se: (not se.ativa, -se.atualizado))
+            if not sessoes:
+                self.put(r, x0, "nenhuma sessão na última hora", "dim", iw)
+            for se in sessoes:
+                if r >= end:
+                    break
+                ago = _ago(now - se.atualizado)
+                nx = self.put(r, x0, "● " if se.ativa else "○ ", "ok" if se.ativa else "dim")
+                nx = self.put(r, nx, f"{se.agente:<9}", color(se.agente))
+                titulo = se.titulo or short(se.pasta)
+                self.put(r, nx, titulo, "text" if se.ativa else "dim", x0 + iw - nx - width(ago) - 1)
+                self.put(r, x0 + iw - width(ago), ago, "dim")
+                r += 1
+                # Subagentes: os que rodam e até 2 concluídos de cada sessão.
+                shown = [sa for sa in se.subagentes if sa.rodando] + [sa for sa in se.subagentes if not sa.rodando][:2]
+                for sa in shown:
+                    if r >= end:
+                        break
+                    mark = SPIN[self.tick % len(SPIN)] if sa.rodando else "✓"
+                    nx = self.put(r, x0 + 2, f"↳ {mark} ", "warn" if sa.rodando else "dim")
+                    label = sa.descricao + (f" · {sa.tipo}" if sa.tipo else "")
+                    self.put(r, nx, label, "text" if sa.rodando else "dim", x0 + iw - nx)
+                    r += 1
+                extra = len(se.subagentes) - len(shown)
+                if extra > 0 and r < end:
+                    self.put(r, x0 + 4, f"… mais {extra} subagente(s) concluído(s)", "dim", iw - 4)
+                    r += 1
+
     def draw_commands(self, y: int, x: int, h: int, w: int) -> None:
+        if self.cmd_preview:  # prévia: como o painel vai ficar, com o que entra, muda e sai
+            self.box(y, x, h, w, "COMANDOS · prévia", "s aplica · outra tecla descarta", "warn")
+            marks = cmdx.diff(self.cfg.commands, self.cmd_preview.comandos)
+            for i, (mark, text) in enumerate(marks[: h - 2]):
+                st = {"+": "ok", "-": "crit", "~": "warn"}.get(mark, "text")
+                nx = self.put(y + 1 + i, x + 2, f"{mark} ", st)
+                self.put(y + 1 + i, nx, text, st if mark != "=" else "text", w - 6)
+            return
         self.box(y, x, h, w, "COMANDOS", "F1–F10 · /r N")
         if not self.cfg.commands:
             self.put(y + 1, x + 2, "nenhum comando permitido", "dim")
@@ -621,6 +770,9 @@ class Hud:
         today = dt.date.today()
         snap = self.vault.snapshot
         items = ag.upcoming(self.agenda.items, snap.tasks, today)
+        blk = self.layout.blocos.get("agenda")
+        if blk and blk.dias:  # [[bloco]] dias = N: só os próximos N dias (atrasados continuam)
+            items = [i for i in items if (i.date - today).days < blk.dias]
         self.agenda_view = items
         late = sum(1 for i in items if i.date < today)
         today_n = sum(1 for i in items if i.date == today)
@@ -688,14 +840,17 @@ class Hud:
             return
         # Resumo: o tamanho da pasta à esquerda; andamento e bloqueados de todos os quadros à direita.
         unit = "notas" if snap.obsidian else "arquivos de texto"
-        nx = self.put(r, x0, f"{snap.notes}{'+' if snap.capped else ''} {unit}", "bold")
+        show_summary = self.shows("resumo")
+        if not show_summary:
+            r -= 2  # sem a linha de resumo (e o respiro dela)
+        nx = self.put(r, x0, f"{snap.notes}{'+' if snap.capped else ''} {unit}", "bold") if show_summary else x0
         nx = self.put(r, nx, f" · {snap.today} hoje · {len(snap.boards)} quadro(s)", "dim")
         doing = sum(b.counts.get("doing", 0) for b in snap.boards)
         blocked = sum(b.counts.get("blocked", 0) for b in snap.boards)
         right = [(f"▶ {doing} em andamento", "warn" if doing else "dim"),
                  ("  ", "dim"), (f"■ {blocked} bloq.", "crit" if blocked else "dim")]
         rw = sum(width(t) for t, _ in right)
-        if snap.boards and nx + 2 + rw <= x0 + iw:
+        if show_summary and snap.boards and nx + 2 + rw <= x0 + iw:
             rx = x0 + iw - rw
             for t, st in right:
                 rx = self.put(r, rx, t, st)
@@ -713,7 +868,11 @@ class Hud:
         space = end - r
         recent_room = (0 if wide or not snap.recent or space < 10
                        else min(len(snap.recent), 3 if space >= 14 else 2) + 2)
-        if snap.boards and r < end:
+        if not self.shows("atencao"):
+            items = []
+        if not self.shows("recentes"):
+            recent_room = 0
+        if snap.boards and r < end and self.shows("quadros"):
             limit = len(snap.boards) if wide else max(3, (space - recent_room) * 3 // 5 - 1)
             r = self._vault_boards(r, x0, lw, snap.boards, limit) + 1
         top = r
@@ -737,7 +896,7 @@ class Hud:
                 r += 1
         # Recentes logo depois da lista, com o espaço que sobrar (ou à direita, em tela larga).
         rx, rr = (x0 + lw + 2, top) if wide else (x0, r + 1 if r > top else r)
-        if snap.recent and rr < end:
+        if snap.recent and rr < end and self.shows("recentes"):
             self.put(rr, rx, "RECENTES", "head")
             rr += 1
             now = time.time()
@@ -813,6 +972,8 @@ class Hud:
         self.box(y, x, h, w, "SAÍDA")
         nx = self.draw_tabs(y, x + 2 + width(" SAÍDA ") + 1, x + w - 2)
         right = f"↑ {self.scroll} linhas · PgDn volta" if self.scroll else "roda · PgUp/PgDn"
+        if self.emphasis and self.focus == "saida":
+            right = "Alt+Z volta · " + right
         room = x + w - 2 - nx - 2
         if room >= 8:
             r = fit(f" {right} ", room)
@@ -951,13 +1112,109 @@ class Hud:
                 pass
             self.say("customização: padrão embutido", "ok")
         elif sub == "salvar":
-            self.save_proposals()
+            self.preview_layout()
         elif cu.valid_name(sub):
             self.use_custom(sub)
         else:
             self.say(f"nome inválido: {sub} (letras minúsculas, números, - e _)", "warn")
 
-    def save_proposals(self, overwrite: bool = False) -> None:
+    def preview_proposal(self) -> None:
+        if self.cmd_proposal:
+            self.preview_commands()
+        elif self.proposals:
+            self.preview_layout()
+        elif self.doc_proposals:
+            self.say("a proposta é de documentação: /doc salvar mostra os arquivos e grava", "dim")
+        else:
+            self.say("nenhuma proposta pendente · peça a um agente (skills hud-comandos, hud-custom)", "dim")
+
+    def preview_commands(self) -> None:
+        p = self.cmd_proposal
+        self.header(f"prévia dos comandos ({len(p.comandos)}) · {self.cfg.commands_file}")
+        for mark, text in cmdx.diff(self.cfg.commands, p.comandos):
+            self.say(f"  {mark} {text}", {"+": "ok", "-": "crit", "~": "warn"}.get(mark, "text"))
+        for a in p.avisos:
+            self.say(f"  ✗ {a}", "warn")
+        if p.avisos:
+            self.say("a proposta tem comandos recusados: peça ao agente para corrigir", "warn")
+            return
+        self.cmd_preview = p
+
+        def yes() -> None:
+            try:
+                cmdx.salvar(self.cfg.commands_file, p.conteudo)
+            except (cmdx.CommandError, OSError) as e:
+                self.say(f"comandos não gravados: {e}", "warn")
+            else:
+                self.cfg.commands = list(p.comandos)
+                self.cfg.commands_source = "comandos.toml"
+                self.cmd_proposal = None
+                self.say(f"✓ {len(p.comandos)} comando(s) gravados em {self.cfg.commands_file}", "ok")
+            self.cmd_preview = None
+
+        def no() -> None:
+            self.cmd_preview = None
+            self.say("prévia descartada · a proposta continua em /proposta", "dim")
+
+        self.pending = Ask("aplicar os comandos propostos", yes, no)
+
+    def preview_layout(self) -> None:
+        """Mostra o layout proposto na tela; só grava e usa com "s"."""
+        if not self.proposals:
+            self.say("nenhuma proposta pendente · peça a um agente (skill hud-custom) e depois /proposta", "dim")
+            return
+        nome = self.proposals[0].nome
+        prop = next((p for p in self.proposals if p.arquivo == "layout.toml"), None)
+        try:
+            preview = lay.parse_text(prop.conteudo, nome, None) if prop else cu.load_custom(self.custom_root, nome)
+        except (lay.LayoutError, OSError) as e:
+            self.say(f"proposta recusada: {e}", "warn")
+            return
+        self.layout_before = (self.layout, self.custom_name, self.feed)
+        self.feed = None  # na prévia, os painéis próprios ainda não rodam
+        self.layout, self.custom_name = preview, nome
+
+        def restore() -> None:
+            if self.layout_before:
+                self.layout, self.custom_name, self.feed = self.layout_before
+                self.layout_before = None
+
+        def yes() -> None:
+            restore()
+            self.save_proposals(overwrite=True, then_use=True)
+
+        def no() -> None:
+            restore()
+            self.say("prévia descartada · /proposta mostra de novo", "dim")
+
+        self.say(f"prévia de “{nome}” na tela · s grava e usa · outra tecla volta", "warn")
+        self.pending = Ask(f"gravar e usar “{nome}”", yes, no)
+
+    def cmd_cmd(self, arg: str) -> None:
+        sub = arg.split()[0].lower() if arg else ""
+        if sub in ("recarregar", "reler"):
+            try:
+                text = cfgmod.read_commands_file(self.cfg.commands_file)
+                raw = cfgmod.parse_commands(text)
+                avisos: list[str] = []
+                cmds = cfgmod.build_commands(raw.get("command", []), avisos)
+            except (cfgmod.ConfigError, OSError) as e:
+                self.say(f"{self.cfg.commands_file}: {e}", "warn")
+                return
+            self.cfg.commands, self.cfg.commands_source = cmds, "comandos.toml"
+            for a in avisos:
+                self.say(f"  aviso: {a}", "warn")
+            self.say(f"✓ {len(cmds)} comando(s) relidos de {self.cfg.commands_file}", "ok")
+            return
+        self.header(f"comandos ({len(self.cfg.commands)}) · fonte: {self.cfg.commands_source}")
+        for i, c in enumerate(self.cfg.commands):
+            argv = " ".join([os.path.basename(c.argv[0]), *c.argv[1:]])
+            self.item(f"F{i + 1}  {c.name}" + (" !" if c.confirm else ""), argv, head_style="accent",
+                      text_style="dim", col=26)
+        self.say(f"arquivo: {self.cfg.commands_file}", "dim")
+        self.say("peça a um agente (skill hud-comandos) · /proposta mostra a prévia · /cmd recarregar relê", "dim")
+
+    def save_proposals(self, overwrite: bool = False, then_use: bool = False) -> None:
         if not self.proposals:
             self.say("nenhuma proposta pendente · peça a um agente (skill hud-custom) e depois /custom salvar", "dim")
             return
@@ -972,7 +1229,10 @@ class Hud:
             return
         self.proposals = []
         self.say(f"✓ customização {nome} gravada ({', '.join(files)}) em {self.custom_root / nome}", "ok")
-        self.say(f"/custom {nome} para usar", "dim")
+        if then_use:
+            self.use_custom(nome)
+        else:
+            self.say(f"/custom {nome} para usar", "dim")
 
     def usage_row(self, r: int, x: int, w: int, label: str, left: float, resets_at) -> None:
         glyph = {"full": "██", "part": "▒▒", "empty": "░░"}
@@ -1128,6 +1388,14 @@ class Hud:
             self.set_mode(ALT_KEYS[ch])
             return
         if isinstance(ch, int):
+            try:
+                kname = curses.keyname(ch).decode()
+            except (curses.error, ValueError, AttributeError):
+                kname = ""
+            if kname in FOCUS_KEYS:
+                self.move_focus(FOCUS_KEYS[kname])
+                return
+        if isinstance(ch, int):
             if curses.KEY_F1 <= ch <= curses.KEY_F0 + 10:
                 self.run_slot(ch - curses.KEY_F1)
             elif ch in (curses.KEY_BACKSPACE,):
@@ -1165,11 +1433,23 @@ class Hud:
                 nxt = None
             finally:
                 self.scr.timeout(200)
+            arrows = {curses.KEY_UP: "up", curses.KEY_DOWN: "down", curses.KEY_LEFT: "left",
+                      curses.KEY_RIGHT: "right"}
             if isinstance(nxt, str) and nxt in MODE_KEYS:
                 self.set_mode(MODE_KEYS[nxt])
+            elif nxt == "5":  # Alt+5: os agentes rodando, na área toda
+                self.show_agents()
+            elif isinstance(nxt, str) and nxt.lower() == "z":  # Alt+Z: ênfase na caixa em foco
+                self.toggle_emphasis()
+            elif nxt in arrows:  # Alt+seta em terminais que mandam Esc + seta
+                self.move_focus(arrows[nxt])
             elif nxt == "[":
                 self.raw_mouse()
             elif nxt is None:
+                if self.drag:
+                    self.drag = ""
+                elif not self.inp and self.emphasis:
+                    self.emphasis = False
                 self.inp, self.cur = "", 0
         elif ch == "\x15":  # Ctrl+U
             self.inp, self.cur = "", 0
@@ -1191,18 +1471,83 @@ class Hud:
         self.unread.discard(mode)
 
     def click(self, row: int, col: int) -> None:
+        """Botão apertado: aba da SAÍDA, foco na caixa e, no título, começo de arraste."""
         for y, x0, x1, tab in self.tab_hits:
             if row == y and x0 <= col < x1:
                 self.set_mode(tab)
                 return
+        pid = lay.panel_at(self.rects, row, col)
+        if pid:
+            self.focus = pid
+            if lay.on_title(self.rects, row, col) == pid and not self.emphasis:
+                self.drag = pid
+
+    def release(self, row: int, col: int) -> None:
+        """Botão solto: se começou num título e caiu em outro lugar, move a caixa."""
+        dragged, self.drag = self.drag, ""
+        if not dragged or row < 0:
+            return
+        try:
+            target = lay.drop_target(self.layout, self.rects, row, col, dragged)
+        except lay.LayoutError:
+            target = None
+        if target:
+            self.apply_drag(dragged, target)
+
+    def move_focus(self, direction: str) -> None:
+        if not self.rects:
+            return
+        if not self.focus or self.focus not in self.rects:
+            self.focus = "saida" if "saida" in self.rects else next(iter(self.rects))
+            return
+        nxt = lay.neighbor(self.rects, self.focus, direction)
+        if nxt:
+            self.focus = nxt
+
+    def toggle_emphasis(self) -> None:
+        if not self.focus:
+            self.focus = "saida"
+        self.emphasis = not self.emphasis
+
+    def show_agents(self) -> None:
+        self.focus, self.emphasis = "agentes", True
+
+    def apply_drag(self, dragged: str, target: tuple) -> None:
+        """Aplica o arraste e guarda o resultado como customização do usuário."""
+        try:
+            new = (lay.swap(self.layout, dragged, target[1]) if target[0] == "swap"
+                   else lay.move(self.layout, dragged, *target[1:]))
+        except lay.LayoutError as e:
+            self.say(f"não dá para mover {dragged}: {e}", "warn")
+            return
+        name = self.custom_name or "pessoal"
+        new = dataclasses.replace(new, nome=name)
+        was_trusted = bool(self.feed and self.feed.trusted)
+        try:
+            cu.save_proposals(self.custom_root, [cu.Proposal(name, "layout.toml", lay.dumps(new))],
+                              sobrescrever=True)
+            if was_trusted:  # o arraste não muda os comandos: a confiança continua
+                cu.Trust(self.cfg.data_dir).trust(name, cu.digest(self.custom_root, name))
+            self.apply_layout(cu.load_custom(self.custom_root, name), name, was_trusted or not self.feed)
+            cu.remember(self.cfg.data_dir, name)
+        except (lay.LayoutError, OSError) as e:
+            self.say(f"layout não gravado: {e}", "warn")
+            return
+        self.say(f"caixa {dragged} movida · layout “{name}” gravado em {self.custom_root / name} · "
+                 "/custom padrao volta ao original", "dim")
 
     def mouse(self) -> None:
         try:
             _, mx, my, _, bstate = curses.getmouse()
         except curses.error:
             return
-        if bstate & CLICK:
+        if bstate & PRESS:
             self.click(my, mx)
+        elif RELEASE and bstate & RELEASE:
+            self.release(my, mx)
+        elif bstate & CLICK:
+            self.click(my, mx)
+            self.release(my, mx)
         elif bstate & WHEEL_UP:
             self.scroll += WHEEL_STEP
         elif bstate & WHEEL_DOWN:
@@ -1245,15 +1590,20 @@ class Hud:
                     buf += c
                 else:
                     return
+                parts = buf.split(";")
+                full = len(parts) == 3 and all(q.isdigit() for q in parts)
                 if c == "M":
-                    parts = buf.split(";")
-                    if len(parts) == 3 and all(q.isdigit() for q in parts):
+                    if full:
                         self.wheel(int(parts[0]), int(parts[1]) - 1, int(parts[2]) - 1)
                     elif parts[0].isdigit():
                         self.wheel(int(parts[0]))
+                elif c == "m" and full and int(parts[0]) & 3 == 0 and not int(parts[0]) & 64:
+                    self.release(int(parts[2]) - 1, int(parts[1]) - 1)  # botão esquerdo solto
             elif c == "M":
                 b, cx, cy = nxt(), nxt(), nxt()  # botão, coluna e linha (+32)
-                if b:
+                if b and ord(b) - 32 == 3:  # X10: soltar (sem dizer qual botão)
+                    self.release(ord(cy) - 33 if cy else -1, ord(cx) - 33 if cx else -1)
+                elif b:
                     self.wheel(ord(b) - 32, ord(cx) - 33 if cx else -1, ord(cy) - 33 if cy else -1)
             elif c is not None:
                 try:
@@ -1393,6 +1743,12 @@ class Hud:
             else:
                 self.say("  " + "  ".join("/" + c for c in cmds), "claude")
                 self.say("no modo Claude, digite o comando direto; nomes que o HUD usa vão com //", "dim")
+        elif verb == "/proposta":
+            self.preview_proposal()
+        elif verb == "/cmd":
+            self.cmd_cmd(arg)
+        elif verb == "/agentes":
+            self.show_agents()
         elif verb == "/skills":
             self.list_skills(arg)
         elif verb == "/skill":
