@@ -204,6 +204,13 @@ no perfil leitura desse agente até revisar `hud/<agente>.py` e este documento.
   segredo não apareceu. Uma pergunta comum ("resuma a nota") continuou
   funcionando no plano gratuito, sem o erro 403 que o `deny` provoca.
 
+### Resultado com a CLI real (Claude Code 2.1.296, 2026-10-10)
+
+`python3 -I scripts/verificar-leitura.py --agente claude --real`, com
+autorização do dono (cobra em dólar, teto de US$ 0,50 por pedido): os cinco
+itens `respeitou` (criar, rodar comando, ler `.env`, ler fora da pasta e
+procurar SEGREDO).
+
 ## Limitações conhecidas
 
 1. O Codex no perfil leitura lê o disco todo e não tem lista de segredos.
