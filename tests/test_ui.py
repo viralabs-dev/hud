@@ -665,6 +665,23 @@ executable = {q(str(self.opencode_exe))}
         # A borda de baixo tem o "ligado há" e o relógio, sem um cobrir o outro.
         self.assertIsNotNone(s.find("ligado há"))
 
+    def test_18_comandos_e_agenda(self):
+        s = self.hud.screen
+        # COMANDOS: tecla F1… e, depois de rodar, o resultado à direita da linha.
+        self.hud.wait_for("F1  Eco")
+        self.assertRegex(s.text(), r"F3  Perigoso !")
+        self.hud.type("/r 1")
+        self.hud.wait_for(lambda s: re.search(r"F1  Eco\s+✓ agora", s.text()) is not None, what="✓ no painel")
+        # AGENDA: um item novo aparece no dia dele; título longo quebra em duas linhas.
+        self.hud.type("/ag amanhã 10h reunião de planejamento trimestral com toda a equipe de produto")
+        self.hud.wait_for("Amanhã ·")
+
+        def quebrou(scr):
+            pos = scr.find("10:00 reunião de planejamento")
+            return pos is not None and "equipe" in scr.line(pos[0]) + scr.line(pos[0] + 1)
+
+        self.hud.wait_for(quebrou, what="título quebrado em duas linhas")
+
     def test_08_roda_do_mouse_rola_a_saida(self):
         self.hud.type("/ajuda")
         self.hud.wait_for("Segurança")

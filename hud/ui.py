@@ -113,6 +113,8 @@ class Hud:
         self.scrolls: dict[str, int] = dict.fromkeys(TABS, 0)
         self.unread: set[str] = set()
         self.cmd_tabs: dict[str, str] = {}  # comando do painel → aba onde foi lançado
+        self.cmd_started: dict[str, float] = {}  # comando → quando começou (painel COMANDOS)
+        self.cmd_last: dict[str, tuple[bool, str, float]] = {}  # comando → (ok, resumo, quando acabou)
         self.search_tab = "notas"
         self.tab_hits: list[tuple[int, int, int, str]] = []  # (linha, x0, x1, aba) para o clique
         self.inp = ""
@@ -294,6 +296,9 @@ class Hud:
             elif kind == "cmd_end":
                 _, cmd, rc, dur, timed_out, truncated = ev
                 tab = self.cmd_tabs.get(cmd.key)
+                self.cmd_last[cmd.key] = (rc == 0 and not timed_out,
+                                          "tempo esgotado" if timed_out else f"código {rc}" if rc else "",
+                                          time.time())
                 extra = " · saída cortada" if truncated else ""
                 if timed_out:
                     self.say(f"✗ {cmd.name}: interrompido após {cmd.timeout:.0f}s{extra}", "crit", tab)
@@ -386,7 +391,8 @@ class Hud:
             "code": A.A_BOLD, "codeline": A.A_NORMAL,
         }
         italic = getattr(A, "A_ITALIC", A.A_DIM)  # PDCurses pode não ter itálico
-        for agent in ("claude", "codex", "opencode"):
+        self.style["text_dim"] = A.A_DIM
+        for agent in ("text", "claude", "codex", "opencode"):
             base = self.style[agent]
             self.style[f"{agent}_bold"] = base | A.A_BOLD
             self.style[f"{agent}_italic"] = base | italic
@@ -576,14 +582,25 @@ class Hud:
         self.box(y, x, h, w, "COMANDOS", "F1–F10 · /r N")
         if not self.cfg.commands:
             self.put(y + 1, x + 2, "nenhum comando permitido", "dim")
+            self.put(y + 2, x + 2, "[[command]] no config.toml", "dim", w - 4)
+        now = time.time()
         for i, c in enumerate(self.cfg.commands[: h - 2]):
-            r = y + 1 + i
-            running = self.runner.is_running(c)
-            nx = self.put(r, x + 2, f"{c.key}", "accent")
-            nx = self.put(r, nx + 1, SPIN[self.tick % len(SPIN)] if running else " ", "warn")
-            nx = self.put(r, nx + 1, c.name, "bold" if running else "text", w - 10)
-            if c.confirm:
-                self.put(r, x + w - 4, "!", "warn")
+            r, right = y + 1 + i, x + w - 2
+            # À direita: rodando (com o tempo) ou o último resultado, com há quanto tempo.
+            if self.runner.is_running(c):
+                status = (f"{SPIN[self.tick % len(SPIN)]} {int(now - self.cmd_started.get(c.key, now))}s", "warn")
+            elif c.key in self.cmd_last:
+                ok, why, at = self.cmd_last[c.key]
+                status = (f"✓ {_ago(now - at)}" if ok else f"✗ {why} · {_ago(now - at)}", "ok" if ok else "crit")
+            else:
+                status = ("", "dim")
+            nx = self.put(r, x + 2, f"F{i + 1:<3}" if i < 10 else f"{c.key:<4}", "accent")
+            room = right - nx - (width(status[0]) + 1 if status[0] else 0) - (2 if c.confirm else 0)
+            nx = self.put(r, nx, c.name, "bold" if status[1] == "warn" else "text", room)
+            if c.confirm:  # pede s antes de rodar
+                self.put(r, nx + 1, "!", "warn")
+            if status[0]:
+                self.put(r, right - width(status[0]), status[0], status[1])
 
     def draw_agenda(self, y: int, x: int, h: int, w: int) -> None:
         today = dt.date.today()
@@ -593,26 +610,53 @@ class Hud:
         late = sum(1 for i in items if i.date < today)
         today_n = sum(1 for i in items if i.date == today)
         self.box(y, x, h, w, "AGENDA", f"{today_n} hoje" + (f" · {late} atrasado(s)" if late else ""))
-        iw, r, last = w - 4, y + 1, None
+        iw, r, end = w - 4, y + 1, y + h - 1
         if not items:
-            self.put(r, x + 2, "Nada marcado.", "dim")
-            self.put(r + 1, x + 2, "/ag amanhã 14h dentista", "accent")
+            for k, (t, st) in enumerate((("Nada marcado.", "dim"), ("/ag amanhã 14h dentista", "accent"),
+                                         ("/ag sex revisar PR", "accent"),
+                                         ("tarefas com data no Vault entram aqui", "dim"))):
+                if r + k < end:
+                    self.put(r + k, x + 2, t, st, iw)
             return
+        now_hm = time.strftime("%H:%M")
+        # O próximo compromisso de hoje (com hora, ainda não passado) fica em destaque.
+        nxt = next((i for i in items if i.date == today and i.time and i.time >= now_hm), None)
+        text_x = x + 2 + 9  # "NN HH:MM "
+        tw = iw - 9
+        # Quebra títulos longos em 2 linhas só se tudo couber assim.
+        days = len({i.date for i in items})
+        extra = sum(1 for i in items if width(i.text) + 3 > tw)
+        wrap2 = len(items) + days + extra <= end - r
+        last = None
         for n, it in enumerate(items, 1):
-            if r >= y + h - 1:
+            if r >= end:
                 break
             if it.date != last:
-                if r >= y + h - 2:
+                if r >= end - 1:
                     break
                 lbl = ag.day_label(it.date, today)
                 self.put(r, x + 2, lbl, "crit" if it.date < today else "head" if it.date == today else "dim")
                 r += 1
                 last = it.date
+            past = it.date < today or (it.date == today and it.time is not None and it.time < now_hm)
+            style = "warn" if it.date < today else "dim" if past else "bold" if it is nxt else "text"
             nx = self.put(r, x + 2, f"{n:>2} ", "dim")
-            nx = self.put(r, nx, f"{it.time or '     '} ", "accent")
-            label = it.text + ("  ◆" if it.source else "")
-            self.put(r, nx, label, "warn" if it.date < today else "text", iw - (nx - x - 2))
+            self.put(r, nx, f"{it.time or '':5} ", "dim" if past else "accent")
+            tail = ""
+            if it is nxt:
+                hh, mm = map(int, it.time.split(":"))
+                mins = hh * 60 + mm - (dt.datetime.now().hour * 60 + dt.datetime.now().minute)
+                tail = "agora" if mins <= 0 else f"em {mins}min" if mins < 60 else f"em {mins // 60}h{mins % 60:02d}"
+            label = it.text + (" ◆" if it.source else "")
+            room = tw - (width(tail) + 1 if tail else 0)
+            parts = wrap(label, room) if wrap2 else [label]
+            self.put(r, text_x, parts[0], style, room)
+            if tail:
+                self.put(r, x + 2 + iw - width(tail), tail, "warn")
             r += 1
+            if len(parts) > 1 and r < end:
+                self.put(r, text_x, " ".join(parts[1:]), style, tw)
+                r += 1
 
     def draw_vault(self, y: int, x: int, h: int, w: int) -> None:
         snap = self.vault.snapshot
@@ -800,7 +844,14 @@ class Hud:
         self.box(y, x, h, w, spec.titulo, status)
         lines = self.feed.lines(pid) if self.feed else []
         room = h - 2
-        shown = lines[:room] if spec.tipo == "texto" else lines[-room:]
+        if spec.tipo == "texto" and lines:  # .md/.txt da customização, formatado como as respostas
+            rendered = [seg for b in md.render("\n".join(lines)) for seg in _md_lines(b, "text", w - 4)]
+            for i, segs in enumerate(rendered[:room]):
+                cx = x + 2
+                for st, t in segs:
+                    cx = self.put(y + 1 + i, cx, t, st)
+            return
+        shown = lines[-room:]
         style = "warn" if status == "não confiado" else "text"
         for i, line in enumerate(shown):
             self.put(y + 1 + i, x + 2, line, style, w - 4)
@@ -917,7 +968,13 @@ class Hud:
             nx = self.put(r, nx, glyph[seg], st if seg != "empty" else "dim") + 1
         reset = us.until(resets_at)
         if reset:
-            self.put(r, nx + 1, f"↺ {reset}", "dim", x + w - 2 - nx - 1)
+            # À direita, igual nos dois painéis: quanto falta e quando zera.
+            when = time.localtime(resets_at)
+            clock = time.strftime("%H:%M" if resets_at - time.time() < 86400 else "%a %H:%M", when)
+            t = f"↺ {reset} · {clock}"
+            if width(t) > x + w - 3 - nx:
+                t = f"↺ {reset}"
+            self.put(r, x + w - 2 - width(t), t, "dim", x + w - 2 - nx)
 
     def draw_usage_codex(self, y: int, x: int, h: int, w: int) -> None:
         u = self.codex_usage.current
@@ -1155,6 +1212,7 @@ class Hud:
             self.say(f"{cmd.name} ainda está rodando", "dim")
             return
         self.cmd_tabs[cmd.key] = self.mode
+        self.cmd_started[cmd.key] = time.time()
         self.header(f"▶ [{cmd.key}] {cmd.name}")
         self.say("$ " + " ".join([os.path.basename(cmd.argv[0]), *cmd.argv[1:]]), "dim")
         self.scroll = 0
