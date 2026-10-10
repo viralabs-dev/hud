@@ -609,6 +609,8 @@ nunca lê seu token OAuth.
 python3 -m unittest discover -s tests -t .
 ```
 
+Conferência da tela à mão no COSMIC Terminal: [`docs/roteiro-cosmic.md`](docs/roteiro-cosmic.md), conduzida por `scripts/roteiro-cosmic.sh`.
+
 ## Licença
 
 MIT — ver [`LICENSE`](LICENSE). O binário embute componentes de terceiros
