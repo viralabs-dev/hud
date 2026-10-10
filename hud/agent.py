@@ -150,7 +150,7 @@ class Agent:
             try:
                 proc.stdin.write(prompt.encode())
                 proc.stdin.close()
-            except BrokenPipeError:
+            except (BrokenPipeError, OSError):  # no Windows, pipe fechado pode dar OSError 22
                 pass
             for raw in proc.stdout:
                 if len(raw) > MAX_LINE:

@@ -57,6 +57,10 @@ MODE_KEYS = {"1": "notas", "2": "claude", "3": "codex", "4": "opencode"}  # Alt+
 TABS = tuple(MODE_KEYS.values())  # cada modo tem a sua aba na SAÍDA
 # PDCurses manda Alt+N como uma tecla só (ALT_1...); o ncurses manda Esc + N.
 ALT_KEYS = {getattr(curses, f"ALT_{n}"): m for n, m in MODE_KEYS.items() if hasattr(curses, f"ALT_{n}")}
+# PDCurses também manda Alt+5, Alt+Z e Alt+setas como teclas próprias.
+ALT_ACTIONS = {getattr(curses, name): act for name, act in (
+    ("ALT_5", "agentes"), ("ALT_Z", "enfase"), ("ALT_UP", "up"), ("ALT_DOWN", "down"),
+    ("ALT_LEFT", "left"), ("ALT_RIGHT", "right")) if hasattr(curses, name)}
 
 # Comandos / do HUD para as sugestões da ENTRADA (a ajuda completa está em HELP).
 SLASH = [
@@ -1386,6 +1390,15 @@ class Hud:
             return
         if isinstance(ch, int) and ch in ALT_KEYS:
             self.set_mode(ALT_KEYS[ch])
+            return
+        if isinstance(ch, int) and ch in ALT_ACTIONS:
+            act = ALT_ACTIONS[ch]
+            if act == "agentes":
+                self.show_agents()
+            elif act == "enfase":
+                self.toggle_emphasis()
+            else:
+                self.move_focus(act)
             return
         if isinstance(ch, int):
             try:
