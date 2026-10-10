@@ -6,7 +6,8 @@ Perfis:
   aprove, então todo pedido de permissão é recusado na hora ("auto-rejecting").
   Não usamos `deny`: ele tira a ferramenta da lista, e o plano gratuito do
   OpenCode recusa a chamada quando a lista muda. Arquivos de segredo ficam em
-  `deny` na leitura.
+  `deny` na leitura. Tudo o que não está liberado por nome (`grep`, ferramentas
+  MCP do seu opencode.json, `lsp`, `skill`...) cai em `"*": "ask"`.
 - `completo`: o OpenCode como no seu terminal, com as permissões do seu
   opencode.json (o que lá estiver em `ask` continua recusado, pela mesma razão).
 O modelo vem de `model` (provedor/modelo); sem ele o `opencode run` pode ficar
@@ -24,6 +25,11 @@ DEFAULT_MODEL = "opencode/big-pickle"  # gratuito, sem credencial
 
 # Leitura: nada escreve, roda comando nem sai para a rede. `read` nega segredos
 # pelo nome; o resto da leitura vale só dentro da pasta (external_directory).
+# `grep` fica em `ask`: a regra dele casa com o padrão buscado, não com o arquivo,
+# e ele procura também em arquivos ocultos — mostraria as linhas de um `.env`
+# (verificado no OpenCode 1.18.23). `"*": "ask"` recusa o que não está liberado
+# por nome, inclusive as ferramentas MCP do opencode.json do usuário.
+READ_TOOLS = ("glob", "list", "todowrite")  # só nomes de arquivo ou a lista de tarefas
 SECRET_GLOBS = ("*.env", "*.env.*", ".env*", "*.pem", "*.key", "id_rsa*", "id_ed25519*",
                 "*credentials*", "*secret*", ".netrc", ".npmrc", ".pypirc")
 
@@ -45,9 +51,12 @@ def read_only_config(read_dirs: tuple[str, ...] = ()) -> str:
     outside = {f"{d.rstrip('/')}/**": "allow" for d in read_dirs}
     outside["*"] = "ask"
     read = {"*": "allow", **{g: "deny" for g in SECRET_GLOBS}}
+    # A regra que vale é a última que casa: "*" vem primeiro (sort_keys) e as
+    # ferramentas nomeadas a seguir a sobrepõem.
     return json.dumps({"permission": {
+        "*": "ask", "grep": "ask",
         "edit": "ask", "bash": "ask", "webfetch": "ask", "websearch": "ask", "task": "ask",
-        "external_directory": outside, "read": read,
+        "external_directory": outside, "read": read, **{t: "allow" for t in READ_TOOLS},
     }}, sort_keys=True)
 
 
