@@ -17,7 +17,7 @@ O código é Python 3.11+ só com a biblioteca padrão; o binário já traz o Py
 
 Execução real do HUD num pseudo-terminal (pty) de 120×40, com `TERM=xterm-256color` e teclas de verdade. Os PNGs e o GIF são quadros renderizados da gravação, não capturas de tela do desktop. Todos os dados são de demonstração: HOME, Vault, agenda, comandos e cache de uso sintéticos, e o Claude, o Codex e o OpenCode são scripts falsos que respondem no formato real. Só os números do painel SISTEMA (CPU, memória, disco) são da máquina que gravou.
 
-**Revisão gravada:** `1fa5f6b`, em 2026-10-10. Para gravar de novo: `python3 scripts/record-screens.py` (o HUD continua sem dependências; só a renderização usa Pillow, num ambiente virtual temporário).
+**Revisão gravada:** `9c16766`, em 2026-10-10. Para gravar de novo: `python3 scripts/record-screens.py` (o HUD continua sem dependências; só a renderização usa Pillow, num ambiente virtual temporário).
 
 ![Tela inicial no modo notas: sistema, comandos, agenda, uso do Claude, Vault ao vivo e a saída na aba NOTAS.](docs/telas/01-notas.png)
 
@@ -303,6 +303,7 @@ diretório atual: um `json.py` ou `curses.py` plantado não é carregado
 | `/ok N` · `/rm N` | conclui · apaga o item N da agenda |
 | `/r N` · `/r nome` | roda um comando do painel (também F1–F10) |
 | Alt+1 · Alt+2 · Alt+3 · Alt+4 | abre a aba e a entrada de notas · Claude · Codex · OpenCode (Tab alterna entre eles; clicar na aba também) |
+| `/` + Tab | a borda da entrada mostra os comandos `/` que combinam; Tab completa (fora de um `/`, Tab alterna o modo) |
 | `/pasta caminho` · `/pasta vault` | lê outra pasta local no lugar do Vault (lembrada) · volta ao Vault |
 | `/b termo` | busca no Vault, nome e conteúdo |
 | `/notas [N]` · `/conflitos` · `/vault` | últimas notas · conflitos de sync · relê o Vault |
