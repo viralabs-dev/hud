@@ -174,6 +174,15 @@ Alt+1/2/3 chega como uma tecla só (`ALT_1`...) e é tratado; Tab também altern
 - **Janela entre `lstat` e `open`.** A conferência do índice depois de abrir
   fecha a troca do arquivo por um link, mas não a troca de uma pasta acima por
   uma junção no meio do caminho.
+- **Gravação do `/doc salvar` pelo caminho.** No Linux e no macOS cada pasta
+  é criada e aberta relativa à anterior (`mkdirat`/`openat` com `O_NOFOLLOW`) e
+  o temporário e o `os.replace` são relativos à pasta aberta, então trocar uma
+  pasta por link no meio não leva a escrita para fora da raiz. O Python no
+  Windows não tem `dir_fd`: lá a gravação continua pelo caminho, conferindo que
+  a pasta resolvida fica dentro da raiz antes de abrir o temporário, logo antes
+  e logo depois do `os.replace` (se depois estiver fora, a nota é apagada e o
+  HUD dá erro). Isso estreita a janela, mas uma junção trocada entre essas
+  conferências ainda passa; não há garantia no Windows.
 - **`taskkill /T` segue a árvore por PID pai.** Um neto cujo pai já saiu não é
   encontrado. Um Job Object com `KILL_ON_JOB_CLOSE` resolveria; ficou de fora
   para não depender de ctypes no caminho de todo comando.
