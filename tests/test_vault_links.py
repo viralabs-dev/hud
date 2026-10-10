@@ -148,7 +148,7 @@ class _Base:
 
     def test_arquivo_maior_que_o_limite(self):
         with mock.patch.object(vault, "MAX_NOTE_BYTES", 64):
-            (self.root / "grande.md").write_text(f"- [ ] {MARCA} 📅 2026-10-10\n" + "x" * 200)
+            (self.root / "grande.md").write_text(f"- [ ] {MARCA} 📅 2026-10-10\n" + "x" * 200, encoding="utf-8")
             w = VaultWatcher(self.root)
             self.sem_marca(w.scan())
             self.assertEqual([h for h in w.search(MARCA) if h[1]], [])
@@ -163,7 +163,7 @@ class _Base:
             self.sem_marca(VaultWatcher(self.root).scan())
 
     def test_read_note_corta_no_limite_mesmo_crescendo(self):
-        self.nota.write_text("a" * 100)
+        self.nota.write_text("a" * 100, encoding="utf-8")
         self.assertIsNone(read_note(str(self.nota), limit=99))
         self.assertEqual(read_note(str(self.nota), limit=100), "a" * 100)
 
@@ -201,7 +201,7 @@ class FifoTest(unittest.TestCase):
             with self.subTest(dir_fd=dir_fd), tempfile.TemporaryDirectory() as d, \
                     mock.patch.object(vault, "DIR_FD", dir_fd):
                 os.mkfifo(os.path.join(d, "fila.md"))
-                Path(d, "nota.md").write_text(DENTRO)
+                Path(d, "nota.md").write_text(DENTRO, encoding="utf-8")
                 w = VaultWatcher(Path(d))
                 snap = self._sem_travar(w.scan)
                 self.assertEqual(snap.notes, 1)
@@ -212,7 +212,7 @@ class FifoTest(unittest.TestCase):
             with self.subTest(dir_fd=dir_fd), tempfile.TemporaryDirectory() as d, \
                     mock.patch.object(vault, "DIR_FD", dir_fd):
                 nota = Path(d, "nota.md")
-                nota.write_text(DENTRO)
+                nota.write_text(DENTRO, encoding="utf-8")
 
                 def gancho(path):
                     if os.path.exists(path) and not os.path.isfile(path):
@@ -235,21 +235,21 @@ class FifoTest(unittest.TestCase):
 class ReadNoteTest(unittest.TestCase):
     def test_link_no_ultimo_componente(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as fora:
-            Path(fora, "s.md").write_text(MARCA)
+            Path(fora, "s.md").write_text(MARCA, encoding="utf-8")
             symlink(self, Path(fora, "s.md"), Path(d, "l.md"))
             self.assertIsNone(read_note(os.path.join(d, "l.md")))
 
     def test_inode_diferente_da_checagem(self):
         with tempfile.TemporaryDirectory() as d:
             a, b = Path(d, "a.md"), Path(d, "b.md")
-            a.write_text("a")
-            b.write_text("b")
+            a.write_text("a", encoding="utf-8")
+            b.write_text("b", encoding="utf-8")
             self.assertIsNone(read_note(str(a), expect=os.lstat(b)))
             self.assertEqual(read_note(str(a), expect=os.lstat(a)), "a")
 
     def test_fora_da_raiz_resolvida(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as fora:
-            Path(fora, "s.md").write_text(MARCA)
+            Path(fora, "s.md").write_text(MARCA, encoding="utf-8")
             caminho = os.path.join(fora, "s.md")
             self.assertIsNone(read_note(caminho, root_real=os.path.realpath(d)))
             self.assertEqual(read_note(caminho, root_real=os.path.realpath(fora)), MARCA)
