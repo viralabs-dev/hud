@@ -80,6 +80,15 @@ def _unquote(v: str) -> str:
     return v
 
 
+def _clip(text: str, limit: int) -> str:
+    """Corta no fim de uma palavra, com "…", para a lista não acabar no meio dela."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit - 1]
+    space = cut.rfind(" ")
+    return (cut[:space] if space > limit // 2 else cut).rstrip(" ,;:.") + "…"
+
+
 def parse_frontmatter(texto: str) -> dict[str, str]:
     """Só o subconjunto simples: `chave: valor` numa linha (com ou sem aspas) e
     valor em bloco `>`/`|`, juntando as linhas indentadas que seguem."""
@@ -121,7 +130,7 @@ def _load(origem: str, pasta: Path) -> Skill | None:
     nome = meta.get("name", "").strip() or pasta.name
     if not NAME_RE.fullmatch(nome):
         return None
-    desc = " ".join(clean_line(meta.get("description", "")).split())[:MAX_DESC]
+    desc = _clip(" ".join(clean_line(meta.get("description", "")).split()), MAX_DESC)
     return Skill(nome, desc, (origem,), pasta, arquivo)
 
 

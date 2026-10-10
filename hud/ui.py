@@ -33,7 +33,7 @@ from .claude import Claude
 from .codex import Codex
 from .opencode import Opencode
 from .runner import Runner
-from .text import clean_line, fit, pad, width, wrap
+from .text import clean_line, fit, pad, width, wrap, wrap_hanging
 from .vault import VaultWatcher
 
 SPARK = "▁▂▃▄▅▆▇█"
@@ -182,6 +182,17 @@ class Hud:
         if tab != self.mode:
             self.unread.add(tab)
 
+    def item(self, head: str, text: str = "", tab: str | None = None, head_style: str = "accent",
+             text_style: str = "text", col: int = 18) -> None:
+        """Uma linha de lista em duas colunas: `head` à esquerda e `text` quebrando
+        dentro da segunda coluna (o recuo acompanha a largura da SAÍDA)."""
+        tab = tab if tab in self.outs else self.mode
+        self.outs[tab].append(("item", text, head, head_style, col, text_style))
+        if self.scrolls[tab]:
+            self.scrolls[tab] += 1
+        if tab != self.mode:
+            self.unread.add(tab)
+
     def header(self, text: str, tab: str | None = None) -> None:
         tab = tab if tab in self.outs else self.mode
         self.say("", "blank", tab)
@@ -316,9 +327,9 @@ class Hud:
                     self.say(f"nada encontrado para “{term}”", "dim", tab)
                 for rel, n, line in hits:
                     loc = f"{rel}:{n}" if n else rel
-                    self.say(f"{loc}", "accent", tab)
+                    self.say(loc, "accent", tab)
                     if line:
-                        self.say(f"    {line}", "text", tab)
+                        self.say(f"    {line.strip()}", "text", tab)
                 if hits:
                     self.say(f"{len(hits)} resultado(s)", "dim", tab)
 
@@ -614,11 +625,20 @@ class Hud:
                 rr += 1
         self.put(end, x + 2, f" {self.cfg.vault} · varredura {snap.scan_ms:.0f}ms ", "dim")
 
-    def output_lines(self, w: int) -> list[tuple[str, str]]:
-        lines: list[tuple[str, str]] = []
-        for style, text in self.out:
-            for part in wrap(text, w) or [""]:
-                lines.append((style, part))
+    def output_lines(self, w: int) -> list[list[tuple[str, str]]]:
+        """Cada linha da tela é uma lista de trechos (estilo, texto)."""
+        lines: list[list[tuple[str, str]]] = []
+        for entry in self.out:
+            if entry[0] != "item":
+                style, text = entry
+                lines += [[(style, part)] for part in wrap_hanging(text, w) or [""]]
+                continue
+            _, text, head, head_style, col, text_style = entry
+            col = max(4, min(col, w // 2))
+            head = fit(head, col - 1)
+            parts = wrap(text, w - col) or [""]
+            lines.append([(head_style, head + " " * (col - width(head))), (text_style, parts[0])])
+            lines += [[(text_style, " " * col + part)] for part in parts[1:]]
         return lines
 
     def draw_output(self, y: int, x: int, h: int, w: int) -> None:
@@ -635,8 +655,10 @@ class Hud:
         if room >= 8:
             r = fit(f" {right} ", room)
             self.put(y, x + w - 2 - width(r), r, "dim")
-        for i, (style, text) in enumerate(view):
-            self.put(y + 1 + i, x + 2, text, style)
+        for i, segs in enumerate(view):
+            cx = x + 2
+            for style, text in segs:
+                cx = self.put(y + 1 + i, cx, text, style)
 
     def draw_tabs(self, y: int, x: int, end: int) -> int:
         """As abas na borda da SAÍDA: a aberta em destaque, ● nas que têm saída nova."""
@@ -745,10 +767,13 @@ class Hud:
             items = cu.list_customs(self.custom_root)
             if not items:
                 self.say("nenhuma ainda · peça a um agente: “crie uma customização …” (skill hud-custom)", "dim")
+            col = min(22, max((width(n) for n, *_ in items), default=0) + 5)
             for nome, desc, erro, embutido in items:
                 mark = "●" if nome == self.custom_name else " "
-                desc = f"{desc} (vem com o HUD)" if embutido else desc
-                self.say(f"{mark} {nome:<16} {erro and '✗ ' + erro or desc}", "warn" if erro else "accent" if mark == "●" else "text")
+                desc = f"{desc} · vem com o HUD" if embutido else desc
+                self.item(f"{mark} {nome}", f"✗ {erro}" if erro else desc,
+                          head_style="warn" if erro else "accent" if mark == "●" else "bold",
+                          text_style="warn" if erro else "text", col=col)
         elif sub in ("padrao", "padrão"):
             self.apply_layout(lay.DEFAULT, "", True)
             try:
@@ -1082,7 +1107,8 @@ class Hud:
         verb, arg = verb.lower(), arg.strip()
         if verb in ("/ajuda", "/help", "/h", "?"):
             self.header("ajuda")
-            self.say(HELP)
+            for line in HELP.split("\n"):  # títulos de seção em destaque
+                self.say(line, "text" if line.startswith(" ") else "bold")
         elif verb in ("/sair", "/q", "/quit"):
             self.quit = True
         elif verb in ("/limpar", "/clear", "/cls"):
@@ -1128,7 +1154,7 @@ class Hud:
             if not cmds:
                 self.say("a lista chega com a primeira resposta do Claude (pergunte algo com /c)", "dim")
             else:
-                self.say("  ".join("/" + c for c in cmds), "claude")
+                self.say("  " + "  ".join("/" + c for c in cmds), "claude")
                 self.say("no modo Claude, digite o comando direto; nomes que o HUD usa vão com //", "dim")
         elif verb == "/skills":
             self.list_skills(arg)
@@ -1205,10 +1231,15 @@ class Hud:
         self.header(f"skills ({len(items)})" + (f" com “{filtro}”" if filtro else ""))
         if not items:
             self.say("nenhuma · as skills ficam em ~/.claude/skills, ~/.codex/skills e nas do HUD", "dim")
+        col = min(26, max((width(s.nome) for s in items), default=0) + 3)
         for s in items:
-            self.say(f"{s.nome:<22} {'+'.join(s.origens):<16} {s.descricao}", "accent" if "hud" in s.origens else "text")
+            # nome · de onde vem; a descrição embaixo, recuada.
+            self.item(s.nome, " · ".join(s.origens), head_style="bold" if "hud" in s.origens else "accent",
+                      text_style="dim", col=col)
+            if s.descricao:
+                self.say("    " + s.descricao, "text")
         if items:
-            self.say("/skill nome [pedido] usa uma skill com o agente do modo (nas notas, o Claude)", "dim")
+            self.say("/skill nome [pedido] · usa com o agente do modo", "dim")
 
     def use_skill(self, arg: str, intencao: str = "", shown: str = "") -> None:
         nome, _, pedido = arg.partition(" ")
@@ -1245,11 +1276,26 @@ class Hud:
         projs, lista = self.projects_summary()
         if not arg or arg.lower() in ("lista", "listar"):
             self.header(f"projetos em {self.cfg.vault} ({len(projs)})")
-            for p in projs:
-                self.say(f"{p.nome:<24} {p.pasta}", "accent")
+            col = min(30, max((width(p.nome) for p in projs), default=0) + 6)
+            boards = {b.rel: b for b in self.vault.snapshot.boards}
+            area = None
+            for p in sorted(projs, key=lambda p: (p.pasta.rpartition("/")[0].lower(), p.nome.lower())):
+                pai = p.pasta.rpartition("/")[0]
+                if pai != area:  # agrupa pela área (a pasta de cima)
+                    area = pai
+                    self.say(f"  {pai or '.'}/", "dim")
+                b = boards.get(p.kanban or "") or next(  # quadro em outra subpasta do projeto
+                    (b for rel, b in boards.items() if rel.startswith(p.pasta + "/")), None)
+                if b:  # o Kanban do projeto, como no painel do Vault
+                    c = b.counts
+                    resumo = (f"{c.get('todo', 0)} a fazer · {c.get('doing', 0)} andam. · "
+                              f"{c.get('blocked', 0)} bloq. · {c.get('done', 0)} feito")
+                else:
+                    resumo = "Kanban ainda não lido" if p.kanban else "sem Kanban"
+                self.item("    " + p.nome, resumo, text_style="dim" if not b else "text", col=col)
             if not projs:
                 self.say("nenhum projeto no modelo (pasta com NN-backlog/Kanban (Nome).md ou Nome.md)", "dim")
-            self.say("/project pedido · cria um projeto novo ou consulta com o agente (skill projeto-docs)", "dim")
+            self.say("/project pedido · cria ou consulta com o agente (projeto-docs)", "dim")
             return
         self.use_skill(f"projeto-docs {arg}", (
             f"Intenção: /project. Se o pedido for para criar um projeto, monte o projeto completo no modelo, na "

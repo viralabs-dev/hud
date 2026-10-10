@@ -11,7 +11,7 @@ from unittest import mock
 from hud import agenda as ag
 from hud import config
 from hud.runner import Runner
-from hud.text import clean, fit, width, wrap
+from hud.text import clean, fit, hanging_indent, width, wrap, wrap_hanging
 from hud.vault import VaultWatcher, parse_board, parse_tasks
 from tests.suporte import ECHO, ECHO_ARGV, SLEEP, WINDOWS, fake_executable, posix_only, symlink, windows_only
 
@@ -36,6 +36,25 @@ class TextTest(unittest.TestCase):
         self.assertEqual(width(fit("日本語テキスト", 5)), 5)
         for line in wrap("uma frase comprida que precisa quebrar " * 3, 20):
             self.assertLessEqual(width(line), 20)
+
+    def test_hanging_indent(self):
+        self.assertEqual(hanging_indent("texto"), 0)
+        self.assertEqual(hanging_indent("- item"), 2)
+        self.assertEqual(hanging_indent("  • item"), 4)
+        self.assertEqual(hanging_indent("12. item"), 4)
+        self.assertEqual(hanging_indent("    recuada"), 6)  # sem marcador: recuo + 2
+
+    def test_wrap_hanging_aligns_continuation(self):
+        lines = wrap_hanging("- " + "palavra " * 12, 24)
+        self.assertGreater(len(lines), 2)
+        self.assertTrue(lines[0].startswith("- palavra"))
+        for line in lines[1:]:
+            self.assertTrue(line.startswith("  palavra"), line)
+        for line in lines:
+            self.assertLessEqual(width(line), 24)
+        # Sem recuo, igual ao wrap; recuo grande demais para a largura é ignorado.
+        self.assertEqual(wrap_hanging("a b c d e f", 3), wrap("a b c d e f", 3))
+        self.assertEqual(wrap_hanging(" " * 20 + "x y z w", 8), wrap(" " * 20 + "x y z w", 8))
 
 
 class AgendaTest(unittest.TestCase):

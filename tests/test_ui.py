@@ -658,6 +658,34 @@ executable = {q(str(self.opencode_exe))}
         self.assertEqual(self.hud.wait_exit(), 0)
 
 
+class OutputLayoutTest(unittest.TestCase):
+    """A SAÍDA em linhas de tela: itens em duas colunas e quebra recuada."""
+
+    def lines(self, entries, w):
+        from collections import deque
+        from types import SimpleNamespace
+
+        from hud.ui import Hud
+        hud = SimpleNamespace(out=deque(entries))
+        return ["".join(t for _, t in segs) for segs in Hud.output_lines(hud, w)], Hud.output_lines(hud, w)
+
+    def test_item_two_columns(self):
+        texts, segs = self.lines([("item", "descrição longa que precisa quebrar em várias linhas",
+                                   "nome", "accent", 10, "dim")], 30)
+        self.assertEqual(texts[0][:10], "nome      ")
+        self.assertTrue(all(t.startswith(" " * 10) for t in texts[1:]))
+        self.assertTrue(all(len(t) <= 30 for t in texts))
+        self.assertEqual(segs[0][0], ("accent", "nome      "))
+        self.assertEqual(segs[0][1][0], "dim")
+        # Nome maior que a coluna é cortado com reticências, sem empurrar o texto.
+        texts, _ = self.lines([("item", "x", "nome-muito-comprido", "accent", 8, "text")], 30)
+        self.assertEqual(texts[0], "nome-m… x")
+
+    def test_plain_text_hanging(self):
+        texts, _ = self.lines([("text", "- " + "item " * 10)], 20)
+        self.assertTrue(all(t.startswith("  ") for t in texts[1:]))
+
+
 class ScreenTest(unittest.TestCase):
     """O emulador em si, com sequências escritas à mão."""
 

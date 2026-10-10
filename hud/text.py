@@ -104,3 +104,28 @@ def strip_markdown(s: str) -> str:
     s = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", s)
     s = s.replace("**", "").replace("__", "").replace("`", "")
     return re.sub(r"\s+", " ", s).strip()
+
+
+# Recuo da continuação: num item de lista ("- ", "• ", "1. "), o texto depois do
+# marcador; numa linha recuada, o recuo dela mais 2. Assim a quebra fica alinhada.
+_LEAD = re.compile(r"^( *)([-*•·] +|\d{1,3}[.)] +)?")
+
+
+def hanging_indent(line: str) -> int:
+    m = _LEAD.match(line)
+    lead, bullet = len(m.group(1)), m.group(2) or ""
+    # Linha recuada sem marcador continua 2 colunas mais para dentro, para a
+    # continuação não parecer um item novo da mesma lista.
+    return lead + (len(bullet) if bullet else 2 if lead else 0)
+
+
+def wrap_hanging(s: str, w: int, indent: int | None = None) -> list[str]:
+    """Como `wrap`, mas as linhas de continuação ficam recuadas (`hanging_indent`)."""
+    lines = wrap(s, w)
+    ind = hanging_indent(s) if indent is None else indent
+    if len(lines) <= 1 or ind <= 0 or ind > w // 2:
+        return lines
+    head = lines[0]
+    rest = s[len(head):].lstrip()
+    return [head] + [" " * ind + part for part in wrap(rest, w - ind)]
+
