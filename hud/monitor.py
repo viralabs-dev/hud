@@ -983,7 +983,7 @@ class MonitorWatcher(threading.Thread):
         self._lock = threading.Lock()
         self._snap = Monitor()
         self._wake = threading.Event()
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()
         self._cpu: dict = {}
         self._cache: dict = {}
 
@@ -996,7 +996,7 @@ class MonitorWatcher(threading.Thread):
         self._wake.set()
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
         self._wake.set()
 
     def scan(self) -> Monitor:
@@ -1007,7 +1007,7 @@ class MonitorWatcher(threading.Thread):
             return Monitor([], [], time.time(), type(e).__name__)
 
     def run(self) -> None:
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             snap = self.scan()
             with self._lock:
                 self._snap = snap

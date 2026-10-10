@@ -757,6 +757,7 @@ executable = {q(str(self.opencode_exe))}
         self.hud.wait_for("CPU")
         row, col = s.find("CPU")
         self.hud.send(f"\x1b[<0;{col + 1};{row + 1}M\x1b[<0;{col + 1};{row + 1}m".encode())
+        time.sleep(0.3)  # o clique e o Alt+Z no mesmo pacote confundem o ncurses mais antigo
         self.hud.send("\x1bz")
         self.hud.wait_for(lambda s: "Alt+Z volta" in s.text() and "SISTEMA" in s.text() and "AGENDA" not in s.text(),
                           what="ênfase no SISTEMA")
