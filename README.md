@@ -17,7 +17,7 @@ O código é Python 3.11+ só com a biblioteca padrão; o binário já traz o Py
 
 Execução real do HUD num pseudo-terminal (pty) de 120×40, com `TERM=xterm-256color` e teclas de verdade. Os PNGs e o GIF são quadros renderizados da gravação, não capturas de tela do desktop. Todos os dados são de demonstração: HOME, Vault, agenda, comandos e cache de uso sintéticos, e o Claude, o Codex e o OpenCode são scripts falsos que respondem no formato real. Só os números do painel SISTEMA (CPU, memória, disco) são da máquina que gravou.
 
-**Revisão gravada:** `cf4b580`, em 2026-10-09. Para gravar de novo: `python3 scripts/record-screens.py` (o HUD continua sem dependências; só a renderização usa Pillow, num ambiente virtual temporário).
+**Revisão gravada:** `54d7014`, em 2026-10-09. Para gravar de novo: `python3 scripts/record-screens.py` (o HUD continua sem dependências; só a renderização usa Pillow, num ambiente virtual temporário).
 
 ![Tela inicial no modo notas: sistema, comandos, agenda, uso do Claude, Vault ao vivo e a saída na aba NOTAS.](docs/telas/01-notas.png)
 
@@ -460,6 +460,12 @@ config); a entrada mostra **⚠ ferramentas completas** enquanto ele vale. Nos d
 perfis do Claude, os segredos continuam negados e o teto por pergunta vale. Uma
 resposta curta custou US$ 0,03 no perfil leitura e US$ 0,26 no completo, que
 carrega os MCP.
+
+As respostas aparecem formatadas: títulos, listas com a quebra alinhada,
+**negrito**, *itálico*, `código`, blocos de código numa faixa recuada e tabelas
+com colunas alinhadas (ou uma linha por registro, se não couberem). As propostas
+de arquivo (`hud-doc`, `hud-custom`) aparecem como uma linha com o nome e o
+tamanho, não o arquivo inteiro.
 
 O Codex roda `codex exec --json` e retoma a conversa com `codex exec resume
 <thread_id>`; o fim de cada resposta mostra os tokens da conversa.
