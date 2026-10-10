@@ -40,6 +40,10 @@ KEYS = "1234567890"
 MAX_COMMANDS = len(KEYS)
 
 DEFAULT_CONFIG_PATH = plat.default_config_path()
+# Os [[command]] podem morar num arquivo só deles, ao lado do config.toml: quando
+# ele existe (e é privado), substitui os [[command]] do config.toml.
+COMMANDS_FILE = "comandos.toml"
+MAX_COMMANDS_FILE = 64 * 1024
 
 LINUX_COMMANDS = [
     {"name": "Uptime e usuários", "argv": ["w", "-s"]},
@@ -113,6 +117,8 @@ class Config:
     folder_source: str = "config"
     codex: CodexConfig | None = None
     opencode: OpencodeConfig | None = None
+    commands_file: Path = Path(COMMANDS_FILE)  # onde o comandos.toml fica (ou ficaria)
+    commands_source: str = "padrão"  # "comandos.toml" | "config.toml" | "padrão"
 
 
 def _private_group(gid: int) -> bool:
@@ -206,6 +212,60 @@ def build_command(i: int, raw: dict) -> Command:
     )
 
 
+def commands_path(config_path: Path | None = None) -> Path:
+    """O comandos.toml que vale junto com este config.toml (mesma pasta)."""
+    return Path(config_path or DEFAULT_CONFIG_PATH).with_name(COMMANDS_FILE)
+
+
+def parse_commands(text: str) -> list:
+    """A lista crua de [[command]] de um comandos.toml (só `command` no topo)."""
+    if len(text.encode("utf-8")) > MAX_COMMANDS_FILE:
+        raise ConfigError(f"{COMMANDS_FILE} passa de {MAX_COMMANDS_FILE // 1024} KB")
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(f"TOML inválido: {e}") from None
+    extra = sorted(set(data) - {"command"})
+    if extra:
+        raise ConfigError(f"chave desconhecida no topo: {', '.join(extra)} (só [[command]])")
+    raw = data.get("command", [])
+    if not isinstance(raw, list):
+        raise ConfigError("'command' precisa ser uma lista de tabelas [[command]]")
+    return raw
+
+
+def read_commands_file(path: Path) -> list:
+    """Lê um comandos.toml: sem link, seu, fechado para outros, até 64 KB."""
+    if plat.is_link(path):
+        raise ConfigError(f"{path} é link simbólico ou junção")
+    check_private_file(path)
+    try:
+        fd = plat.open_nofollow(path, os.O_RDONLY | plat.O_CLOEXEC)
+        with os.fdopen(fd, "rb") as fh:
+            raw = fh.read(MAX_COMMANDS_FILE + 1)
+    except OSError as e:
+        raise ConfigError(f"não consegui ler {path}: {e.strerror or e}") from None
+    if len(raw) > MAX_COMMANDS_FILE:
+        raise ConfigError(f"{path} passa de {MAX_COMMANDS_FILE // 1024} KB")
+    return parse_commands(raw.decode("utf-8", "replace"))
+
+
+def build_commands(raw_cmds, warnings: list[str]) -> list[Command]:
+    """Valida a lista de [[command]]; o que é recusado vira aviso, o resto ganha tecla."""
+    if not isinstance(raw_cmds, list):
+        warnings.append("comando ignorado: 'command' precisa ser uma lista de tabelas")
+        return []
+    if len(raw_cmds) > MAX_COMMANDS:
+        warnings.append(f"só os {MAX_COMMANDS} primeiros comandos entram no painel")
+    out: list[Command] = []
+    for raw in raw_cmds[:MAX_COMMANDS]:
+        try:
+            out.append(build_command(len(out), raw))
+        except ConfigError as e:
+            warnings.append(f"comando ignorado: {e}")
+    return out
+
+
 FORBIDDEN_ROOTS = plat.LINUX_FORBIDDEN_ROOTS  # macOS e Windows: plat.system_folder
 FOLDER_FILE = "pasta"
 
@@ -280,16 +340,20 @@ def load(path: Path | None = None, folder: str | None = None) -> Config:
             cfg.vault, cfg.folder_source = mem, "escolhida com /pasta"
     except (ConfigError, OSError) as e:
         warnings.append(f"pasta ignorada: {e}")
-    raw_cmds = data.get("command", DEFAULT_COMMANDS)
-    if len(raw_cmds) > MAX_COMMANDS:
-        warnings.append(f"só os {MAX_COMMANDS} primeiros comandos entram no painel")
-    slot = 0
-    for raw in raw_cmds[:MAX_COMMANDS]:
+    # Prioridade: comandos.toml (privado) > [[command]] do config.toml > os padrão.
+    cfg.commands_file = commands_path(path)
+    raw_cmds = None
+    if cfg.commands_file.exists() or plat.is_link(cfg.commands_file):
         try:
-            cfg.commands.append(build_command(slot, raw))
-            slot += 1
+            raw_cmds = read_commands_file(cfg.commands_file)
+            cfg.commands_source = COMMANDS_FILE
         except ConfigError as e:
-            warnings.append(f"comando ignorado: {e}")
+            warnings.append(f"{COMMANDS_FILE} ignorado: {e}")
+    if raw_cmds is None and "command" in data:
+        raw_cmds, cfg.commands_source = data["command"], "config.toml"
+    if raw_cmds is None:
+        raw_cmds = DEFAULT_COMMANDS
+    cfg.commands = build_commands(raw_cmds, warnings)
     if data.get("claude", {}).get("enabled", True) is not False:
         try:
             cfg.claude = build_claude(data.get("claude", {}), cfg.vault)

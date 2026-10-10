@@ -50,6 +50,7 @@ def main() -> int:
 
     if args.check:
         print(f"configuração: {cfg.source}\npasta: {cfg.vault} ({cfg.folder_source})\ndados: {cfg.data_dir}")
+        print(f"comandos: {cfg.commands_source} (arquivo próprio: {cfg.commands_file})")
         for c in cfg.commands:
             flag = " (pede confirmação)" if c.confirm else ""
             print(f"  [{c.key}] {c.name}: {' '.join(c.argv)} · {c.timeout:.0f}s{flag}")

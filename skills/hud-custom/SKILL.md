@@ -69,6 +69,38 @@ arquivo = "notas.md"     # arquivo desta pasta
   `argv = ["docker", "ps"]` (lista, sem shell), `intervalo = 30` (segundos,
   de 5 a 3600, padrão 30) e `timeout = 10` (de 1 a 60, padrão 10).
 
+### Blocos: ajustar os painéis embutidos
+
+Cada painel embutido pode ser ajustado com uma tabela `[[bloco]]` no mesmo
+`layout.toml`: trocar o título, escolher o que ele mostra e, na agenda, quantos
+dias. O bloco não põe o painel na tela (isso continua sendo a lista `paineis`
+das colunas); ele só muda como o painel aparece quando está lá.
+
+```toml
+[[bloco]]
+id = "sistema"          # painel embutido: sistema, comandos, agenda, uso_claude, uso_codex, vault (ou pasta), saida, agentes
+titulo = "MÁQUINA"      # opcional, até 30 caracteres
+mostrar = ["cpu", "mem", "disco", "load", "rede"]   # opcional, só para os blocos que aceitam
+dias = 7                # opcional, só para agenda (1 a 30)
+```
+
+Valores de `mostrar`, por bloco (a ordem da lista não importa; o que ficar de
+fora some do painel):
+
+| bloco | `mostrar` aceita |
+|---|---|
+| `sistema` | `cpu`, `historico`, `mem`, `swap`, `disco`, `load`, `rede`, `sensores` |
+| `vault` (ou `pasta`) | `resumo`, `quadros`, `atencao`, `recentes` |
+| `agentes` | `processos`, `sessoes` |
+
+Os outros blocos (`comandos`, `agenda`, `uso_claude`, `uso_codex`, `saida`)
+aceitam só `titulo`; a `agenda` aceita também `dias`. Um `[[bloco]]` por id;
+`id` que não é embutido, `mostrar` com valor desconhecido ou em bloco que não
+aceita, e `dias` fora de 1 a 30 fazem o HUD recusar o layout. Sem `[[bloco]]`,
+cada painel fica como sempre foi. Para mudar os **comandos** do painel
+COMANDOS (F1–F10), use a skill `hud-comandos`: eles moram no `comandos.toml`,
+não no layout.
+
 ### Regras de validação
 
 O HUD recusa o layout (com a mensagem do erro) quando:
@@ -206,9 +238,13 @@ nome do arquivo na linha de abertura:
 - `arquivo` é `layout.toml` ou um `.md`/`.txt`, sem `/`;
 - o conteúdo do bloco é o arquivo inteiro, não um trecho.
 
-O HUD guarda os blocos da última resposta. Termine dizendo ao usuário para
-digitar `/custom salvar` (valida e grava; se a pasta já existir, o HUD pede
-confirmação) e depois `/custom <nome>` para aplicar.
+O HUD guarda os blocos da última resposta e, antes de gravar, mostra uma
+**pré-visualização** na tela: a tela como vai ficar com a customização
+proposta (colunas, painéis, títulos e blocos) e os erros de validação, se
+houver. Só com `s` a proposta é gravada e aplicada; qualquer outra tecla
+descarta e nada muda. Termine dizendo ao usuário para digitar `/custom salvar`
+(abre a pré-visualização; se a pasta já existir, o HUD avisa que vai
+sobrescrever) e apertar `s` para aceitar.
 
 Exemplo literal de resposta:
 
@@ -248,7 +284,7 @@ arquivo = "lembretes.md"
 - Uma coisa de cada vez.
 ```
 
-Para usar, digite `/custom salvar` e depois `/custom foco`.
+Digite `/custom salvar`: o HUD mostra a pré-visualização e aplica com `s`.
 ````
 
 ## Fora do HUD
@@ -279,7 +315,7 @@ Comandos do HUD (funcionam em qualquer modo da entrada: notas, Claude ou Codex):
 | `/custom lista` | lista as customizações disponíveis |
 | `/custom <nome>` | aplica a customização (fica lembrada) |
 | `/custom padrao` | volta ao layout embutido |
-| `/custom salvar` | grava os blocos `hud-custom` da última resposta do agente |
+| `/custom salvar` | pré-visualiza os blocos `hud-custom` da última resposta; `s` grava e aplica |
 
 ## Segurança
 
