@@ -55,6 +55,10 @@ kanban-plugin: board
 
 - [ ] Card andando no teste
 
+## Bloqueado
+
+- [ ] Card parado no teste
+
 ## Concluído
 
 - [x] Card feito
@@ -630,6 +634,23 @@ executable = {q(str(self.opencode_exe))}
         self.hud.send(ALT[1])
         self.wait_input("ENTRADA", "›")
         self.assertIn("4 OPENCODE", s.text())
+
+    def test_16_painel_do_vault(self):
+        s = self.hud.screen
+        self.hud.wait_for("ATENÇÃO")
+        text = s.text()
+        # Resumo com os totais de todos os quadros; tabela com barra e percentual.
+        self.assertIn("▶ 1 em andamento", text)
+        self.assertIn("■ 1 bloq.", text)
+        self.assertRegex(text, r"QUADRO\s+fazer\s+andam\s+bloq\s+feito")
+        self.assertRegex(text, r"Teste\s+1\s+1\s+1\s+1\s+[█░]+\s+25%")
+        # Lista de atenção: andamento (▶) antes do bloqueado (■), com o quadro.
+        doing, blocked = s.find("▶ Teste"), s.find("■ Teste")
+        self.assertIsNotNone(doing)
+        self.assertIsNotNone(blocked)
+        self.assertLess(doing[0], blocked[0])
+        self.assertIn("Card parado no teste", text)
+        self.assertIn("RECENTES", text)
 
     def test_08_roda_do_mouse_rola_a_saida(self):
         self.hud.type("/ajuda")

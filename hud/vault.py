@@ -234,7 +234,8 @@ class VaultWatcher(threading.Thread):
             del self._cache[gone]
         mtimes.sort(reverse=True)
         snap.recent = [(rel, m) for m, rel in mtimes[:12]]
-        snap.boards.sort(key=lambda b: (-(b.counts.get("doing", 0)), b.name.lower()))
+        snap.boards.sort(key=lambda b: (-b.counts.get("doing", 0), -b.counts.get("blocked", 0),
+                                        -b.counts.get("todo", 0), b.name.lower()))
         snap.conflicts.sort()
         snap.capped = snap.notes >= MAX_FILES
         snap.ok = True

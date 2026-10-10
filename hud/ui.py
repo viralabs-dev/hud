@@ -585,67 +585,109 @@ class Hud:
         title = "VAULT · ao vivo" if snap.obsidian or not snap.ok else f"PASTA · {clean_line(root.name)} · ao vivo"
         self.box(y, x, h, w, title, ago)
         x0, iw, r, end = x + 2, w - 4, y + 1, y + h - 1
+        home = str(Path.home())
+        shown_root = "~" + str(root)[len(home):] if str(root).startswith(home) else str(root)
+        self.put(end, x + 2, f" {shown_root} · varredura {snap.scan_ms:.0f}ms ", "dim", iw)
         if not snap.ok:
             self.put(r, x0, snap.error or f"lendo {root}…", "warn" if snap.error else "dim")
             return
+        # Resumo: o tamanho da pasta à esquerda; andamento e bloqueados de todos os quadros à direita.
         unit = "notas" if snap.obsidian else "arquivos de texto"
         nx = self.put(r, x0, f"{snap.notes}{'+' if snap.capped else ''} {unit}", "bold")
-        nx = self.put(r, nx, f" · {snap.today} mexidos hoje · {len(snap.boards)} quadros", "dim")
+        nx = self.put(r, nx, f" · {snap.today} hoje · {len(snap.boards)} quadro(s)", "dim")
+        doing = sum(b.counts.get("doing", 0) for b in snap.boards)
+        blocked = sum(b.counts.get("blocked", 0) for b in snap.boards)
+        right = [(f"▶ {doing} em andamento", "warn" if doing else "dim"),
+                 ("  ", "dim"), (f"■ {blocked} bloq.", "crit" if blocked else "dim")]
+        rw = sum(width(t) for t, _ in right)
+        if snap.boards and nx + 2 + rw <= x0 + iw:
+            rx = x0 + iw - rw
+            for t, st in right:
+                rx = self.put(r, rx, t, st)
         if snap.conflicts:
-            self.put(r, nx, f"  ⚠ {len(snap.conflicts)} conflito(s) de sync", "warn")
+            r += 1
+            self.put(r, x0, f"⚠ {len(snap.conflicts)} conflito(s) de sync · /conflitos", "warn")
         r += 2
-        if not snap.boards:
-            r -= 1
-        name_w = max(10, min(18, iw - 34))
-        cols = [("todo", "a fazer"), ("doing", "andam."), ("blocked", "bloq."), ("done", "feito")]
-        if snap.boards:
-            self.put(r, x0, pad("QUADRO", name_w), "dim")
-            for i, (_, lbl) in enumerate(cols):
-                self.put(r, x0 + name_w + i * 8, f"{lbl:>7}", "dim")
-            r += 1
-        for b in snap.boards:
-            if r >= end - 3:
-                break
-            self.put(r, x0, pad(b.name, name_w), "text")
-            for i, (k, _) in enumerate(cols):
-                n = b.counts.get(k)
-                st = ("warn" if k == "doing" else "crit" if k == "blocked" else "dim") if n else "dim"
-                self.put(r, x0 + name_w + i * 8, f"{'—' if n is None else n:>7}", st)
-            r += 1
-        r += 1
-        doing = [(b.name, t) for b in snap.boards for t in b.doing]
         wide = iw >= 110
         lw = iw // 2 - 1 if wide else iw
+        # Uma lista só de atenção: primeiro o que está andando (▶), depois o bloqueado (■).
+        items = ([("▶", "warn", b.name, t) for b in snap.boards for t in b.doing]
+                 + [("■", "crit", b.name, t) for b in snap.boards for t in b.blocked])
+        # Divisão do espaço (empilhado): recentes com 2 ou 3 linhas, a tabela com ~3/5
+        # do resto e a lista de atenção com o que sobra.
+        space = end - r
+        recent_room = (0 if wide or not snap.recent or space < 10
+                       else min(len(snap.recent), 3 if space >= 14 else 2) + 2)
+        if snap.boards and r < end:
+            limit = len(snap.boards) if wide else max(3, (space - recent_room) * 3 // 5 - 1)
+            r = self._vault_boards(r, x0, lw, snap.boards, limit) + 1
         top = r
-        if doing and r < end:
-            self.put(r, x0, f"EM ANDAMENTO ({len(doing)})", "head")
+        lists_end = end if wide else end - recent_room
+        if items and lists_end - r >= 2:
+            self.put(r, x0, "ATENÇÃO", "head")  # os totais já estão no resumo
             r += 1
-            # Empilhado, metade do espaço restante fica para os recentes.
-            room = end - r if wide else max(2, (end - r - 2) // 2)
-            shown = doing if len(doing) <= room else doing[: max(1, room - 1)]
-            for board, title in shown:
-                nx = self.put(r, x0, fit(board, 8, False).ljust(9), "warn")
-                self.put(r, nx, title, "text", lw - 9)
+            bw = min(16, max(width(it[2]) for it in items) + 1)
+            room = lists_end - r - (1 if lists_end - r >= 4 else 0)
+            show = items if len(items) <= room else items[:max(0, room - 1)]
+            for mark, color, board, t in show:
+                nx = self.put(r, x0, mark + " ", color)
+                nx = self.put(r, nx, fit(board, bw - 1).ljust(bw), color)
+                self.put(r, nx, t, "text", lw - bw - 2)
                 r += 1
-            if len(shown) < len(doing):
-                self.put(r, x0, f"… mais {len(doing) - len(shown)}", "dim")
+            if len(show) < len(items):
+                rest = items[len(show):]
+                d = sum(1 for it in rest if it[0] == "▶")
+                parts = [f"{d} em andamento" if d else "", f"{len(rest) - d} bloqueado(s)" if len(rest) > d else ""]
+                self.put(r, x0, "… mais " + " · ".join(p for p in parts if p), "dim")
                 r += 1
-            if not wide:
-                r += 1
-        rx, rr = (x0 + lw + 2, top) if wide else (x0, r)
-        if rr < end:
+        # Recentes logo depois da lista, com o espaço que sobrar (ou à direita, em tela larga).
+        rx, rr = (x0 + lw + 2, top) if wide else (x0, r + 1 if r > top else r)
+        if snap.recent and rr < end:
             self.put(rr, rx, "RECENTES", "head")
             rr += 1
             now = time.time()
+            room_w = iw - (rx - x0)
             for rel, m in snap.recent:
                 if rr >= end:
                     break
                 p = Path(rel)
-                age = _ago(now - m)
-                nx = self.put(rr, rx, f"{age:>6} ", "dim")
-                nx = self.put(rr, nx, clean_line(p.stem), "text", (iw if not wide else lw) - 7)
+                nx = self.put(rr, rx, f"{_ago(now - m):>6}  ", "dim")
+                nx = self.put(rr, nx, clean_line(p.stem), "text", room_w - 8)
+                folder = str(p.parent)
+                if folder != "." and nx + 4 < rx + room_w:
+                    self.put(rr, nx, f"  {clean_line(folder)}", "dim", rx + room_w - nx)
                 rr += 1
-        self.put(end, x + 2, f" {self.cfg.vault} · varredura {snap.scan_ms:.0f}ms ", "dim")
+
+    def _vault_boards(self, r: int, x0: int, w: int, boards, limit: int) -> int:
+        """Tabela dos quadros: nome, a fazer, andamento, bloqueados, feitos e uma barra
+        do que já foi concluído. Devolve a próxima linha livre."""
+        cols = [("todo", "fazer"), ("doing", "andam"), ("blocked", "bloq"), ("done", "feito")]
+        longest = max((width(b.name) for b in boards), default=8)
+        name_w = max(8, min(26, longest + 2, w - 6 * len(cols)))
+        bar_w = max(0, min(12, w - name_w - 6 * len(cols) - 7))  # barra + " 100%"
+        self.put(r, x0, pad("QUADRO", name_w), "dim")
+        for i, (_, lbl) in enumerate(cols):
+            self.put(r, x0 + name_w + i * 6, f"{lbl:>6}", "dim")
+        r += 1
+        show = boards if len(boards) <= limit else boards[:max(1, limit - 1)]
+        for b in show:
+            self.put(r, x0, pad(fit(b.name, name_w - 1), name_w), "text")
+            for i, (k, _) in enumerate(cols):
+                n = b.counts.get(k, 0)
+                st = {"doing": "warn", "blocked": "crit"}.get(k, "text") if n else "dim"
+                self.put(r, x0 + name_w + i * 6, f"{n if n else '·':>6}", st)
+            total = sum(b.counts.get(k, 0) for k, _ in cols)
+            if bar_w >= 4 and total:
+                frac = b.counts.get("done", 0) / total
+                full = round(bar_w * frac)
+                bx = self.put(r, x0 + name_w + 6 * len(cols) + 2, "█" * full, "ok")
+                bx = self.put(r, bx, "░" * (bar_w - full), "dim")
+                self.put(r, bx, f" {frac:>4.0%}", "dim")
+            r += 1
+        if len(show) < len(boards):
+            self.put(r, x0, f"… +{len(boards) - len(show)} quadro(s)", "dim")
+            r += 1
+        return r
 
     def output_lines(self, w: int) -> list[list[tuple[str, str]]]:
         """Cada linha da tela é uma lista de trechos (estilo, texto)."""
