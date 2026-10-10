@@ -2,9 +2,9 @@
   "name": "hud-demo",
   "capture": "execução real do HUD num pty; teclas e roda do mouse injetadas; sem desktop nem navegador",
   "data": "100% demonstração: HOME, Vault, agenda, comandos e cache de uso sintéticos em /tmp/hud-demo; Claude e Codex falsos; só os números do painel SISTEMA são da máquina",
-  "recorded_at": "2026-10-10T00:29:07-03:00",
-  "revision": "9c16766d0faff3a1c725174d392c7a366f2360d7",
-  "revision_short": "9c16766",
+  "recorded_at": "2026-10-10T00:55:56-03:00",
+  "revision": "94aca325f10b0718f863bab0891e61f49bf273b9",
+  "revision_short": "94aca32",
   "revision_dirty": false,
   "command": "bin/hud -c /tmp/hud-demo/config.toml",
   "terminal": {
@@ -14,156 +14,158 @@
   },
   "python": "3.14.7",
   "bin_hud_sha256": "ec906216e0504036b468aff2ef31b2d90f522ad5be7e7d71c0088ea691a70744",
-  "code_sha256": "5503960c5ef6ea9efacde6fa2e3734caceab96982631cbf8db0ff64f5bb3002c",
+  "code_sha256": "9bbce8c3db7cf9a154b2ba1e590c577325eba797ac0521963ff45d3aab2b3981",
   "files_sha256": {
     "bin/hud": "ec906216e0504036b468aff2ef31b2d90f522ad5be7e7d71c0088ea691a70744",
-    "hud/__init__.py": "36640ce4a31de5fb241f85a13c825021e07bf4ad7385df4760e3c7cad7543b58",
-    "hud/__main__.py": "1c5da991a8373d64dbf91ac6d08807638b5f9ba458e82e1da2747ec0385b4b2d",
+    "hud/__init__.py": "e0e00db98eecb54c6bc7913f982415dfae3156f0b74d7b7ef122cce51158cfd4",
+    "hud/__main__.py": "34d7bf896c0a0083fbf86c98527cdf5c3369672b14e466558951d044ec3f2c38",
     "hud/agenda.py": "dab73c689cda16d5c683f059d2b96ebdc39d9dd4aa37ab314e9aba88333ef836",
     "hud/agent.py": "00ca9aa897c023155f4d7b61aec1e45bec383ef5c83af48b6bac5f893d4d9c15",
     "hud/claude.py": "5b51de09c29cdd4fc215ddd8491f013786a318a1a9a75817f20ae07b4dd375b2",
     "hud/codex.py": "a2eec95d9fceb13e6da49453dc12091c957cbb12abfe89db661bef119824d574",
-    "hud/config.py": "f63e2c52cd83747cb90960b9c7b1d5154b3d3b729b9dc05a4c1d307b34bb7a6c",
+    "hud/comandos.py": "e0efe4318434d5fa36b71c4950c6d7a78bddb06273f0f674e386894901072e24",
+    "hud/config.py": "8ac8fcc2c9ac96da55c0f40c9b8db9c37532a26073307c895085a8915c8c9d63",
     "hud/custom.py": "27400c92b3bdc96b8ecf2efc45047ecbbd40f75491e903401c5070c40ee16402",
     "hud/docs.py": "04d2ae46e699c962cb7e74629c2b440f8a017be0c62ec6f76e34c70e6b84cde3",
-    "hud/layout.py": "2859319ed6e531095d0fd83740e0bc1db601ac1fb03b9d9766294452b8e1879f",
+    "hud/layout.py": "d442d124f9d55b669d241edc9ed67399a6fc561088f6d000688b1be156cea847",
     "hud/markdown.py": "264a992ab3eca5b317ce74ef5d3ba4b7f478452d9d94b60ce594f3946c5ddfb7",
     "hud/metrics.py": "adb31f83c4d112a7e8bf72e54bb953b321c18e493b0c7d5a9f08adea2946fd4b",
     "hud/metrics_linux.py": "fc85199d1b0ed21b4c7d87c738a267cbcd0013111d5be790c8180be45d369a7f",
     "hud/metrics_macos.py": "5024c62e6d18717aa1dfd4032c308790c0675cb4ade2d1c450536cec86c2ae51",
     "hud/metrics_windows.py": "d5769e9afa80d600189f837f196f622136aecdb9d7a895da12d28fd9146a7a9b",
+    "hud/monitor.py": "19eed0341cd1914f2a5e360519a2fe9e2da5c3155a8f3af51e07ebb01d7c29ae",
     "hud/opencode.py": "acc8fc5cb17768b2e174b31b48b744b3da0258cfdd54d802f194e21ef6eba08c",
     "hud/plataforma.py": "23792b382a7d4dcd591c4956394606702de1abc70c8d2834e597cb609765a876",
     "hud/runner.py": "2d4e967ff0d2cb01915651f1d0138c6a726998c8807db0c2b692777ab61db4e9",
     "hud/skills.py": "d696798ff6556dd9eb04d6a9aa5f885802b2f4f3d5f7f21f7e099e0ae8013e40",
     "hud/text.py": "87e60132ffc136712b1bc260831459c6bbecc1f2ae844fa1e76c7f19a82ec48c",
-    "hud/ui.py": "a2148c51b47662953a5ae4f34dda6d975715a0c09349b93e58be2216355a3c94",
+    "hud/ui.py": "4845f308b93eb4453ecf523f13dabffa81fb07473dd37cf33cca7f3f86bba49d",
     "hud/usage.py": "c57ea4c5b73bdbd8eb2e509e76972361b4cfd0b6e9e04cd760b0748cecf8164c",
     "hud/vault.py": "19b525d7c36bc9063ec0b6879a1a0643541c15515dc17951e06ff9e9b209d6c2"
   },
   "events": [
     {
-      "time": 1.191797,
+      "time": 1.225831,
       "label": "F1: roda o comando Uptime",
       "keys": "\u001bOP",
       "hex": "1b4f50"
     },
     {
-      "time": 1.842555,
+      "time": 1.876559,
       "label": "nota livre",
       "keys": "ligar para a gráfica sobre os folders\r",
       "hex": "6c6967617220706172612061206772c3a16669636120736f627265206f7320666f6c646572730d"
     },
     {
-      "time": 4.994395,
+      "time": 5.026961,
       "label": "Alt+2: modo Claude",
       "keys": "\u001b2",
       "hex": "1b32"
     },
     {
-      "time": 5.644778,
+      "time": 5.677219,
       "label": "pergunta ao Claude",
       "keys": "quais cards estão bloqueados nos quadros?\r",
       "hex": "717561697320636172647320657374c3a36f20626c6f71756561646f73206e6f732071756164726f733f0d"
     },
     {
-      "time": 10.127029,
+      "time": 10.141097,
       "label": "Alt+3: modo Codex",
       "keys": "\u001b3",
       "hex": "1b33"
     },
     {
-      "time": 10.777292,
+      "time": 10.791385,
       "label": "pergunta ao Codex",
       "keys": "liste as pendências abertas nas notas\r",
       "hex": "6c697374652061732070656e64c3aa6e636961732061626572746173206e6173206e6f7461730d"
     },
     {
-      "time": 14.292139,
+      "time": 14.306091,
       "label": "/parar: interrompe o Codex",
       "keys": "/parar\r",
       "hex": "2f70617261720d"
     },
     {
-      "time": 15.153064,
+      "time": 15.167168,
       "label": "Alt+4: modo OpenCode",
       "keys": "\u001b4",
       "hex": "1b34"
     },
     {
-      "time": 15.764393,
+      "time": 15.786797,
       "label": "pergunta ao OpenCode",
       "keys": "o que está em andamento nos quadros?\r",
       "hex": "6f2071756520657374c3a120656d20616e64616d656e746f206e6f732071756164726f733f0d"
     },
     {
-      "time": 19.258498,
+      "time": 19.28259,
       "label": "Alt+1: modo notas",
       "keys": "\u001b1",
       "hex": "1b31"
     },
     {
-      "time": 19.872727,
+      "time": 19.897603,
       "label": "/limpar",
       "keys": "/limpar\r",
       "hex": "2f6c696d7061720d"
     },
     {
-      "time": 20.41881,
+      "time": 20.443571,
       "label": "/ajuda",
       "keys": "/ajuda\r",
       "hex": "2f616a7564610d"
     },
     {
-      "time": 22.480756,
+      "time": 22.505655,
       "label": "roda do mouse para cima (1)",
       "keys": "\u001b[<64;60;20M",
       "hex": "1b5b3c36343b36303b32304d"
     },
     {
-      "time": 22.880944,
+      "time": 22.905841,
       "label": "roda do mouse para cima (2)",
       "keys": "\u001b[<64;60;20M",
       "hex": "1b5b3c36343b36303b32304d"
     },
     {
-      "time": 23.281133,
+      "time": 23.306003,
       "label": "roda do mouse para cima (3)",
       "keys": "\u001b[<64;60;20M",
       "hex": "1b5b3c36343b36303b32304d"
     },
     {
-      "time": 24.932133,
+      "time": 24.957608,
       "label": "roda do mouse para baixo (1)",
       "keys": "\u001b[<65;60;20M",
       "hex": "1b5b3c36353b36303b32304d"
     },
     {
-      "time": 25.232307,
+      "time": 25.257808,
       "label": "roda do mouse para baixo (2)",
       "keys": "\u001b[<65;60;20M",
       "hex": "1b5b3c36353b36303b32304d"
     },
     {
-      "time": 25.532417,
+      "time": 25.557973,
       "label": "roda do mouse para baixo (3)",
       "keys": "\u001b[<65;60;20M",
       "hex": "1b5b3c36353b36303b32304d"
     },
     {
-      "time": 25.882899,
+      "time": 25.908522,
       "label": "/pasta projeto de exemplo",
       "keys": "/pasta /tmp/hud-demo/projeto-exemplo\r",
       "hex": "2f7061737461202f746d702f6875642d64656d6f2f70726f6a65746f2d6578656d706c6f0d"
     },
     {
-      "time": 29.298015,
+      "time": 29.325249,
       "label": "/pasta vault: volta ao Vault",
       "keys": "/pasta vault\r",
       "hex": "2f7061737461207661756c740d"
     },
     {
-      "time": 31.170219,
+      "time": 31.197695,
       "label": "Ctrl+C: sai",
       "keys": "\u0003",
       "hex": "03"
@@ -172,40 +174,40 @@
   "scenes": [
     {
       "name": "01-notas",
-      "time": 4.994356,
+      "time": 5.026933,
       "caption": "Tela inicial no modo notas: sistema, comandos, agenda, uso do Claude, Vault ao vivo e a saída na aba NOTAS."
     },
     {
       "name": "02-claude",
-      "time": 10.127009,
+      "time": 10.141073,
       "caption": "Aba e modo Claude (laranja): uma pergunta e a resposta do Claude falso."
     },
     {
       "name": "03-codex",
-      "time": 14.292101,
+      "time": 14.306066,
       "caption": "Aba e modo Codex (cinza): a pergunta e a resposta chegando do Codex falso."
     },
     {
       "name": "07-opencode",
-      "time": 19.258465,
+      "time": 19.282553,
       "caption": "Aba e modo OpenCode (lilás): a pergunta e a resposta do OpenCode falso."
     },
     {
       "name": "04-ajuda",
-      "time": 22.480733,
+      "time": 22.505617,
       "caption": "/ajuda na saída."
     },
     {
       "name": "05-rolagem",
-      "time": 24.932088,
+      "time": 24.957477,
       "caption": "Saída rolada para cima com a roda do mouse."
     },
     {
       "name": "06-pasta",
-      "time": 29.297999,
+      "time": 29.325218,
       "caption": "/pasta com um projeto de exemplo no lugar do Vault."
     }
   ],
-  "duration_seconds": 31.390305,
+  "duration_seconds": 31.413936,
   "exit_code": 0
 }
