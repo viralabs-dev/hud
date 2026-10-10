@@ -3,11 +3,22 @@ Nunca escreve nada na pasta.
 
 Uma thread varre o Vault a cada N segundos e só relê as notas cuja data de
 modificação mudou. A tela pega o último retrato pronto (`snapshot`).
+
+Links: a varredura não segue link nenhum, e a leitura não confia no caminho
+entre a checagem e a abertura (alguém pode trocar o arquivo, ou uma pasta do
+caminho, por um link nesse meio-tempo). No POSIX a árvore é percorrida por
+descritores de pasta (`os.fwalk`) e cada nota é aberta relativa à pasta já
+aberta, sem seguir link (`O_NOFOLLOW`) e sem bloquear (`O_NONBLOCK`, para FIFO
+não travar). Em todo sistema o que vale é o descritor: `fstat` precisa dizer
+arquivo comum, o mesmo dispositivo e inode que a checagem viu e tamanho dentro
+do limite. No Windows (sem abertura relativa a pasta) o caminho resolvido ainda
+precisa ficar dentro da pasta (veja `read_note`).
 """
 
 import datetime as dt
 import os
 import re
+import stat
 import threading
 import time
 from dataclasses import dataclass, field
@@ -27,6 +38,13 @@ CARD = re.compile(r"^- \[([ xX])\] (.*)")
 DUE = re.compile(r"(?:📅\s*|@\{|\[due::\s*)(\d{4}-\d{2}-\d{2})")
 OPEN_TASK = re.compile(r"^\s*- \[ \] (.+)")
 TIME_IN_TASK = re.compile(r"@@\{(\d{2}:\d{2})\}|⏰\s*(\d{2}:\d{2})")
+
+# Abertura relativa a uma pasta já aberta (openat): POSIX. Sem ela (Windows),
+# a varredura usa o caminho e confere o resultado (veja read_note).
+DIR_FD = (not plat.WINDOWS and hasattr(os, "fwalk") and os.open in os.supports_dir_fd
+          and os.stat in os.supports_dir_fd and os.stat in os.supports_follow_symlinks)
+O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+_READ_FLAGS = os.O_RDONLY | plat.O_CLOEXEC | plat.O_NONBLOCK | plat.O_BINARY
 
 # Nomes das colunas variam um pouco entre quadros; normaliza para quatro.
 COLUMN_KIND = {
@@ -122,6 +140,67 @@ def parse_tasks(text: str, rel: str) -> list[Item]:
     return out
 
 
+def _antes_de_abrir(path: str) -> None:
+    """Entre a checagem (lstat) e a abertura de uma nota. Não faz nada: é o
+    ponto em que os testes trocam o arquivo por um link, de forma determinística."""
+
+
+def _text(data: bytes) -> str:
+    text = data.decode("utf-8", "replace")
+    if "\r" in text:  # como o modo texto do open(): \r\n e \r viram \n
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text
+
+
+def read_note(path: str, name: str | None = None, dir_fd: int | None = None, expect=None,
+              limit: int = MAX_NOTE_BYTES, root_real: str | None = None) -> str | None:
+    """Texto da nota, lido por um descritor validado; None se não der para confiar.
+
+    Abre sem seguir link no último componente e sem bloquear. Com `dir_fd`
+    (POSIX), abre `name` relativo à pasta já aberta, então nenhuma pasta do
+    caminho pode ter virado link. Sem ele (Windows), abre `path` e, se vier
+    `root_real`, confere que o caminho resolvido ainda fica dentro da pasta.
+    No descritor (`fstat`): arquivo comum, o mesmo dispositivo e inode de
+    `expect` (o lstat da checagem) e no máximo `limit` bytes, inclusive se o
+    arquivo crescer durante a leitura.
+    """
+    _antes_de_abrir(path)
+    try:
+        if dir_fd is not None:
+            fd = os.open(name, _READ_FLAGS | plat.O_NOFOLLOW, dir_fd=dir_fd)
+        else:
+            fd = plat.open_nofollow(path, _READ_FLAGS)
+    except (OSError, ValueError):
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > limit:
+            return None
+        if expect is not None and st.st_ino and expect.st_ino and (
+                (st.st_dev, st.st_ino) != (expect.st_dev, expect.st_ino)):
+            return None
+        if dir_fd is None and root_real is not None and not plat.inside(os.path.realpath(path), [root_real]):
+            return None
+        chunks, total = [], 0
+        want = min(st.st_size, limit) + 1
+        while total <= limit:
+            b = os.read(fd, want)
+            if not b:
+                break
+            chunks.append(b)
+            total += len(b)
+            want = limit + 1 - total
+            if want <= 0:
+                break
+        if total > limit:
+            return None
+        return _text(b"".join(chunks))
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
 class VaultWatcher(threading.Thread):
     def __init__(self, root: Path, interval: float = 5.0):
         super().__init__(daemon=True, name="vault")
@@ -170,9 +249,34 @@ class VaultWatcher(threading.Thread):
             self._wake.wait(self.interval)
             self._wake.clear()
 
-    def iter_notes(self):
+    def _entries(self):
+        """(rel, nome, fd da pasta ou None) de cada nota candidata, sem seguir link.
+
+        POSIX: `os.fwalk` sem seguir link percorre por descritores (uma pasta
+        que vira link no meio não é seguida), e o fd da pasta vale enquanto o
+        laço de quem chama trata os arquivos dela. Windows: `os.walk`, tirando
+        as junções.
+        """
         root = str(self.root)
         n = 0
+        if DIR_FD:
+            try:
+                top = os.open(root, os.O_RDONLY | O_DIRECTORY | plat.O_CLOEXEC)
+            except OSError:
+                return
+            try:
+                for dirpath, dirs, files, dfd in os.fwalk(".", dir_fd=top, follow_symlinks=False):
+                    dirs[:] = [d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS]
+                    base = "" if dirpath == "." else dirpath[2:]
+                    for f in files:
+                        if f.lower().endswith(NOTE_EXT) and not f.startswith("."):
+                            n += 1
+                            if n > MAX_FILES:
+                                return
+                            yield (os.path.join(base, f) if base else f), f, dfd
+            finally:
+                os.close(top)
+            return
         for dirpath, dirs, files in os.walk(root, followlinks=False):
             dirs[:] = [d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS]
             if plat.WINDOWS:  # os.walk entra em junções; o HUD não segue link nenhum
@@ -182,7 +286,31 @@ class VaultWatcher(threading.Thread):
                     n += 1
                     if n > MAX_FILES:
                         return
-                    yield os.path.join(dirpath, f)
+                    yield os.path.relpath(os.path.join(dirpath, f), root), f, None
+
+    def iter_notes(self):
+        root = str(self.root)
+        for rel, _name, _dfd in self._entries():
+            yield os.path.join(root, rel)
+
+    def _notes(self):
+        """(rel, caminho, nome, fd da pasta, lstat) das notas que são arquivo comum."""
+        root = str(self.root)
+        for rel, name, dfd in self._entries():
+            path = os.path.join(root, rel)
+            try:
+                if dfd is not None:
+                    st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
+                else:
+                    st = os.lstat(path)
+            except OSError:
+                continue
+            if not stat.S_ISREG(st.st_mode) or plat.is_reparse(st):
+                continue
+            yield rel, path, name, dfd, st
+
+    def _root_real(self) -> str | None:
+        return None if DIR_FD else os.path.realpath(self.root)
 
     def scan(self) -> Snapshot:
         t0 = time.monotonic()
@@ -194,16 +322,9 @@ class VaultWatcher(threading.Thread):
         midnight = dt.datetime.combine(dt.date.today(), dt.time()).timestamp()
         mtimes: list[tuple[float, str]] = []
         seen = set()
-        root = str(self.root)
+        root_real = self._root_real()
         try:
-            for path in self.iter_notes():
-                try:
-                    st = os.lstat(path)
-                except OSError:
-                    continue
-                if not os.path.isfile(path) or os.path.islink(path) or plat.is_reparse(st):
-                    continue
-                rel = os.path.relpath(path, root)
+            for rel, path, name, dfd, st in self._notes():
                 seen.add(rel)
                 snap.notes += 1
                 if st.st_mtime >= midnight:
@@ -216,12 +337,10 @@ class VaultWatcher(threading.Thread):
                 if not cached or cached[0] != st.st_mtime or cached[1] != st.st_size:
                     board, tasks = None, []
                     if st.st_size <= MAX_NOTE_BYTES:
-                        try:
-                            with open(path, encoding="utf-8", errors="replace") as f:
-                                text = f.read()
-                            board, tasks = parse_board(text, rel), parse_tasks(text, rel)
-                        except OSError:
-                            pass
+                        text = read_note(path, name, dfd, st, MAX_NOTE_BYTES, root_real)
+                        if text is None:
+                            continue  # trocado ou ilegível: não guarda, tenta na próxima
+                        board, tasks = parse_board(text, rel), parse_tasks(text, rel)
                     cached = (st.st_mtime, st.st_size, board, tasks)
                     self._cache[rel] = cached
                 if cached[2]:
@@ -246,24 +365,17 @@ class VaultWatcher(threading.Thread):
     def search(self, term: str, limit: int = 40) -> list[tuple[str, int, str]]:
         """Busca simples, sem regex, sem diferenciar maiúsculas."""
         needle = term.lower()
-        root = str(self.root)
+        root_real = self._root_real()
         hits: list[tuple[str, int, str]] = []
-        for path in self.iter_notes():
-            if os.path.islink(path) or (plat.WINDOWS and plat.is_link(path)):
-                continue
-            rel = os.path.relpath(path, root)
+        for rel, path, name, dfd, st in self._notes():
             if needle in rel.lower():
                 hits.append((rel, 0, ""))
-            try:
-                if os.path.getsize(path) > MAX_NOTE_BYTES:
-                    continue
-                with open(path, encoding="utf-8", errors="replace") as f:
-                    for n, line in enumerate(f, 1):
-                        if needle in line.lower():
-                            hits.append((rel, n, clean_line(line.strip())))
-                            break
-            except OSError:
-                continue
+            if st.st_size <= MAX_NOTE_BYTES:
+                text = read_note(path, name, dfd, st, MAX_NOTE_BYTES, root_real)
+                for n, line in enumerate((text or "").split("\n"), 1):
+                    if needle in line.lower():
+                        hits.append((rel, n, clean_line(line.strip())))
+                        break
             if len(hits) >= limit:
                 break
         return hits
