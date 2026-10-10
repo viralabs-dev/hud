@@ -790,8 +790,7 @@ executable = {q(str(self.opencode_exe))}
         self.hud.type("troque os comandos CMDPROPOSTA")
         self.hud.wait_for("proposta de comandos: 2 comando(s)")
         self.hud.type("/proposta")
-        self.hud.wait_for("COMANDOS · prévia")
-        self.assertIn("+ ", s.text())
+        self.hud.wait_for(lambda s: "COMANDOS · prévia" in s.text() and "+ " in s.text(), what="prévia com +")
         self.assertFalse(cmds_file.exists())  # nada gravado antes do "s"
         self.hud.send("s")
         self.hud.wait_for("comando(s) gravados")
