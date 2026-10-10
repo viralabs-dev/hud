@@ -129,10 +129,13 @@ out({"type": "rate_limit_event", "rate_limit_info": {"unifiedWindows": {
      "five_hour": {"utilization": 0.36, "resetsAt": RESET5},
      "seven_day": {"utilization": 0.58, "resetsAt": RESET7}}}})
 out({"type": "assistant", "message": {"content": [{"type": "text", "text":
-     "Há dois cards bloqueados:\n"
-     "• Site novo · Aprovar a paleta de cores (aguarda retorno do cliente)\n"
-     "• Mudança de escritório · Contrato da internet (falta a assinatura)\n"
-     "Sugestão: cobrar a paleta hoje; o contrato pode esperar a visita de quinta."}]}})
+     "## Cards bloqueados\n\n"
+     "Há **dois** cards bloqueados nos quadros:\n\n"
+     "| Quadro | Card | Falta |\n|---|---|---|\n"
+     "| Site novo | Aprovar a paleta de cores | retorno do cliente |\n"
+     "| Mudança de escritório | Contrato da internet | a assinatura |\n\n"
+     "- **Sugestão:** cobrar a paleta hoje; o contrato pode esperar a visita de quinta.\n"
+     "- Os dois estão em `Projetos/`."}]}})
 out({"type": "result", "subtype": "success", "is_error": False, "session_id": "demo-sessao-1",
      "total_cost_usd": 0.03}, 0)
 '''

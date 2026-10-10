@@ -26,6 +26,7 @@ from .config import Command, Config, ConfigError, remember_folder, validate_fold
 from .metrics import Metrics, human_bytes, human_duration
 from . import custom as cu
 from . import docs as dc
+from . import markdown as md
 from . import skills as sk
 from . import layout as lay
 from . import usage as us
@@ -33,7 +34,7 @@ from .claude import Claude
 from .codex import Codex
 from .opencode import Opencode
 from .runner import Runner
-from .text import clean_line, fit, pad, width, wrap, wrap_hanging
+from .text import clean_line, fit, pad, width, wrap, wrap_hanging, wrap_runs
 from .vault import VaultWatcher
 
 SPARK = "▁▂▃▄▅▆▇█"
@@ -193,6 +194,17 @@ class Hud:
         if tab != self.mode:
             self.unread.add(tab)
 
+    def say_md(self, text: str, agent: str) -> None:
+        """Resposta de um agente: Markdown em linhas com estilo, na aba dele."""
+        tab = agent if agent in self.outs else self.mode
+        blocks = md.render(text)
+        for b in blocks:
+            self.outs[tab].append(("md", b, agent))
+        if self.scrolls[tab]:
+            self.scrolls[tab] += len(blocks)
+        if tab != self.mode:
+            self.unread.add(tab)
+
     def header(self, text: str, tab: str | None = None) -> None:
         tab = tab if tab in self.outs else self.mode
         self.say("", "blank", tab)
@@ -290,7 +302,7 @@ class Hud:
                 else:
                     self.say(f"✗ {cmd.name} · código {rc} · {dur:.1f}s{extra}", "warn", tab)
             elif kind == "agent_text":
-                self.say(ev[2], ev[1], ev[1])
+                self.say_md(ev[2], ev[1])
                 found = cu.parse_proposals(ev[2])
                 if found:
                     self.proposals = found
@@ -301,8 +313,7 @@ class Hud:
                     for d in docs:
                         self.doc_proposals[d.arquivo] = d
                     n = len(self.doc_proposals)
-                    self.say(f"✦ proposta de documentação: {n} arquivo(s) para {self.cfg.vault} · "
-                             "/doc salvar grava · /doc descartar", "ok", ev[1])
+                    self.say(f"✦ proposta: {n} arquivo(s) · /doc salvar · /doc descartar", "ok", ev[1])
                     for arq in list(self.doc_proposals)[:12]:
                         self.say(f"    {arq}", "dim", ev[1])
                     if n > 12:
@@ -316,6 +327,9 @@ class Hud:
             elif kind == "agent_end":
                 _, name, ok, msg, dur, summary = ev
                 tail = (f" · {dur:.0f}s" if dur is not None else "") + (f" · {summary}" if summary else "")
+                buf = self.outs.get(name)
+                if buf and buf[-1][0] == "md":  # respiro entre a resposta e o fecho
+                    self.say("", "blank", name)
                 if ok:
                     self.say(f"✓ {name}{tail}", name, name)
                 else:
@@ -368,7 +382,15 @@ class Hud:
             "claude": self.c.get("claude", A.A_BOLD), "claude_dim": self.c.get("claude", 0) | A.A_DIM,
             "codex": self.c.get("codex", 0), "codex_dim": self.c.get("codex_dim", A.A_DIM),
             "opencode": self.c.get("opencode", 0), "opencode_dim": self.c.get("opencode", 0) | A.A_DIM,
+            # Markdown das respostas: código no texto padrão em negrito, para destacar da cor do agente.
+            "code": A.A_BOLD, "codeline": A.A_NORMAL,
         }
+        italic = getattr(A, "A_ITALIC", A.A_DIM)  # PDCurses pode não ter itálico
+        for agent in ("claude", "codex", "opencode"):
+            base = self.style[agent]
+            self.style[f"{agent}_bold"] = base | A.A_BOLD
+            self.style[f"{agent}_italic"] = base | italic
+            self.style[f"{agent}_head"] = base | A.A_BOLD | A.A_UNDERLINE
 
     def level(self, pct: float) -> str:
         return "crit" if pct >= 90 else "warn" if pct >= 70 else "ok"
@@ -629,6 +651,9 @@ class Hud:
         """Cada linha da tela é uma lista de trechos (estilo, texto)."""
         lines: list[list[tuple[str, str]]] = []
         for entry in self.out:
+            if entry[0] == "md":
+                lines += _md_lines(entry[1], entry[2], w)
+                continue
             if entry[0] != "item":
                 style, text = entry
                 lines += [[(style, part)] for part in wrap_hanging(text, w) or [""]]
@@ -1449,6 +1474,50 @@ class Hud:
         self.header(f"últimas notas ({self.notes_path})")
         for line in lines[-n:] or ["nenhuma nota ainda"]:
             self.say(clean_line(line), "text")
+
+
+# Markdown → estilos da tela: a cor é a do agente; ênfase e títulos por atributo.
+def _md_style(kind: str, agent: str) -> str:
+    return {"text": agent, "bold": f"{agent}_bold", "italic": f"{agent}_italic",
+            "head": f"{agent}_head", "quote": f"{agent}_dim", "dim": "dim",
+            "code": "code", "codeline": "codeline"}.get(kind, agent)
+
+
+def _md_lines(block, agent: str, w: int) -> list[list[tuple[str, str]]]:
+    def styled(runs):
+        return [(_md_style(k, agent), t) for k, t in runs]
+
+    if isinstance(block, md.Line):
+        if not block.runs:
+            return [[]]
+        return wrap_runs(styled(block.runs), w, block.hang) or [[]]
+    # Tabela: colunas alinhadas se couber; senão, cada linha vira "a · b · c".
+    rows = [[md.plain(c) for c in row] for row in block.rows]
+    ncol = max(len(r) for r in rows)
+    widths = [max((width(r[i]) if i < len(r) else 0) for r in rows) for i in range(ncol)]
+    if sum(widths) + 3 * (ncol - 1) <= w:
+        out = []
+        for n, row in enumerate(rows):
+            cells = [pad(row[i] if i < len(row) else "", widths[i]) for i in range(ncol)]
+            style = f"{agent}_bold" if n == 0 and block.header else agent
+            segs: list[tuple[str, str]] = []
+            for i, c in enumerate(cells):
+                if i:
+                    segs.append(("dim", " │ "))
+                segs.append((style, c))
+            out.append(segs)
+            if n == 0 and block.header:
+                out.append([("dim", "─┼─".join("─" * x for x in widths))])
+        return out
+    out = []
+    for n, row in enumerate(block.rows):
+        runs: list[tuple[str, str]] = [("text", "• ")]
+        for i, cell in enumerate(row):
+            if i:
+                runs.append(("dim", " · "))
+            runs += [("bold" if n == 0 and block.header else k, t) for k, t in cell]
+        out += wrap_runs(styled(runs), w, 2)
+    return out
 
 
 def _ago(sec: float) -> str:

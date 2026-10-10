@@ -129,3 +129,69 @@ def wrap_hanging(s: str, w: int, indent: int | None = None) -> list[str]:
     rest = s[len(head):].lstrip()
     return [head] + [" " * ind + part for part in wrap(rest, w - ind)]
 
+
+
+def wrap_runs(runs: list[tuple[str, str]], w: int, hang: int = 0) -> list[list[tuple[str, str]]]:
+    """Quebra trechos (estilo, texto) por largura sem perder o estilo de cada um;
+    as linhas de continuação começam com `hang` espaços. Pedaços colados de
+    estilos diferentes (`código`, por exemplo) são uma palavra só."""
+    if w <= 0:
+        return []
+    if hang > w // 2:
+        hang = 0
+    # Palavras: listas de pedaços (estilo, texto) entre espaços; o espaço guarda o estilo.
+    words: list[tuple[list[tuple[str, str]], tuple[str, str] | None]] = []
+    cur_word: list[tuple[str, str]] = []
+    for style, text in runs:
+        for tok in re.split(r"(\s+)", text):
+            if not tok:
+                continue
+            if tok.isspace():
+                words.append((cur_word, (style, tok)))
+                cur_word = []
+            else:
+                cur_word.append((style, tok))
+    words.append((cur_word, None))
+
+    lines: list[list[tuple[str, str]]] = []
+    line: list[tuple[str, str]] = []
+    n = 0
+
+    def push(style: str, text: str) -> None:
+        nonlocal n
+        if line and line[-1][0] == style:
+            line[-1] = (style, line[-1][1] + text)
+        else:
+            line.append((style, text))
+        n += width(text)
+
+    def newline() -> None:
+        nonlocal line, n
+        lines.append(line)
+        line, n = ([("text", " " * hang)] if hang else []), hang
+
+    for pieces, space in words:
+        ww = sum(width(t) for _, t in pieces)
+        if pieces and n + ww > w and n > (hang if lines else 0):
+            newline()
+        for style, text in pieces:
+            while n + width(text) > w:  # palavra maior que a linha: corta
+                head = fit(text, w - n, ellipsis=False) or text[:1]
+                push(style, head)
+                text = text[len(head):]
+                newline()
+            if text:
+                push(style, text)
+        if space and n < w:
+            push(space[0], " " if n + width(space[1]) > w else space[1])
+    # Sem espaço sobrando no fim das linhas.
+    out = []
+    for ln in lines + [line]:
+        while ln and not ln[-1][1].strip() and len(ln) > 1:
+            ln.pop()
+        if ln:
+            ln[-1] = (ln[-1][0], ln[-1][1].rstrip() or ln[-1][1])
+        out.append(ln)
+    while len(out) > 1 and not "".join(t for _, t in out[-1]).strip():
+        out.pop()
+    return out

@@ -584,7 +584,7 @@ executable = {q(str(self.opencode_exe))}
         self.assertIn("Alfa (Alfa)", call["stdin"])
         self.assertTrue(call["stdin"].rstrip().endswith("Pedido: crie o Beta DOCPROPOSTA"))
         self.hud.send(ALT[2])
-        self.hud.wait_for("proposta de documentação: 2 arquivo(s)")
+        self.hud.wait_for("proposta: 2 arquivo(s)")
         self.assertNotIn("[Skill projeto-docs", s.text())  # a tela mostra só o pedido, não a skill inteira
         self.assertFalse((self.vault / "Beta").exists())  # nada gravado antes de /doc salvar
         self.hud.type("/doc salvar")
@@ -598,7 +598,7 @@ executable = {q(str(self.opencode_exe))}
         self.hud.type("/limpar")
         self.hud.wait_for(lambda s: "gravado(s)" not in s.text(), what="aba limpa")
         self.hud.type("/doc reescreva DOCPROPOSTA")
-        self.hud.wait_for("proposta de documentação: 2 arquivo(s)")
+        self.hud.wait_for("proposta: 2 arquivo(s)")
         self.hud.type("/doc salvar")
         self.hud.wait_for("sobrescrever 2 arquivo(s)")
         self.assertEqual((self.vault / "Beta" / "Beta.md").read_text(encoding="utf-8"), "antigo\n")
