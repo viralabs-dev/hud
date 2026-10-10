@@ -626,7 +626,7 @@ class Hud:
         if items and lists_end - r >= 2:
             self.put(r, x0, "ATENÇÃO", "head")  # os totais já estão no resumo
             r += 1
-            bw = min(16, max(width(it[2]) for it in items) + 1)
+            bw = min(max(width(it[2]) for it in items) + 1, max(12, lw // 3))  # até 1/3 da largura
             room = lists_end - r - (1 if lists_end - r >= 4 else 0)
             show = items if len(items) <= room else items[:max(0, room - 1)]
             for mark, color, board, t in show:
