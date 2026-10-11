@@ -1,0 +1,12 @@
+[package]
+name = "hud-metrics"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "=1.1.5", features = ["fs"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+hud-runner = { path = "../hud-runner" }

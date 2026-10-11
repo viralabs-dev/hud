@@ -1,0 +1,12 @@
+[
+  {
+    "name": "Other",
+    "folder": "Other",
+    "kanban": null
+  },
+  {
+    "name": "Hud",
+    "folder": "group/Hud",
+    "kanban": "group/Hud/06-backlog/Kanban (Hud).md"
+  }
+]

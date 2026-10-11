@@ -271,7 +271,7 @@ class WorkflowsTest(unittest.TestCase):
 
 class ReadmeTest(unittest.TestCase):
     def test_instalar(self):
-        readme = ler("README.md")
+        readme = ler("docs/legacy/python-guide.pt-BR.md")
         secao = readme.split("## Instalar", 1)[1].split("\n## ", 1)[0]
         for termo in ("install.ps1 | iex", "-ExecutionPolicy Bypass -File", "%LOCALAPPDATA%\\Programs\\hud",
                       "PATH **do usuário**", "-Uninstall", "Gatekeeper", "xattr -d com.apple.quarantine",

@@ -1,0 +1,17 @@
+[package]
+name="hud-custom"
+version="0.1.0"
+edition="2021"
+rust-version="1.88"
+license="MIT"
+[dependencies]
+hud-toml = { path = "../hud-toml" }
+hud-domain={path="../hud-domain"}
+hud-resources={path="../hud-resources"}
+serde_json={version="=1.0.152",features=["preserve_order"]}
+serde="=1.0.229"
+
+sha2="=0.10.9"
+
+[target.'cfg(unix)'.dependencies]
+rustix={version="=1.1.5",features=["fs","process"]}

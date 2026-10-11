@@ -1,0 +1,13 @@
+[workspace]
+members = ["crates/hud-toml", "crates/hud-feeds", "crates/hud-doc-store", "crates/hud-custom", "crates/hud-agent-process", "crates/hud-data", "crates/hud-resources", "crates/hud-metrics", "crates/hud-agent-protocol", "crates/hud-runner", "crates/hud-domain", "crates/hud-tui", "crates/hud-layout-codec", "crates/hud-layout-store"]
+resolver = "2"
+
+[workspace.package]
+version = "0.10.0-preview.12"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+
+[workspace.dependencies]
+ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm", "layout-cache"] }
+crossterm = "=0.29.0"

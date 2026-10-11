@@ -1,0 +1,10 @@
+[package]
+name = "hud-doc-store"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+[dependencies]
+hud-resources = { path = "../hud-resources" }
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "=1.1.5", features = ["fs", "process"] }

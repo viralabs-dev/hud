@@ -1,0 +1,343 @@
+[
+  {
+    "name": "padrao",
+    "action": null,
+    "rects": {
+      "sistema": [
+        0,
+        0,
+        11,
+        54
+      ],
+      "comandos": [
+        11,
+        0,
+        6,
+        54
+      ],
+      "agenda": [
+        17,
+        0,
+        14,
+        54
+      ],
+      "uso_claude": [
+        31,
+        0,
+        4,
+        54
+      ],
+      "uso_codex": [
+        35,
+        0,
+        5,
+        54
+      ],
+      "vault": [
+        0,
+        54,
+        22,
+        96
+      ],
+      "saida": [
+        22,
+        54,
+        18,
+        96
+      ]
+    },
+    "widths": [
+      36.0,
+      null
+    ]
+  },
+  {
+    "name": "padrao",
+    "action": {
+      "source": "sistema",
+      "column": 2,
+      "index": 0
+    },
+    "rects": {
+      "comandos": [
+        0,
+        0,
+        6,
+        54
+      ],
+      "agenda": [
+        6,
+        0,
+        25,
+        54
+      ],
+      "uso_claude": [
+        31,
+        0,
+        4,
+        54
+      ],
+      "uso_codex": [
+        35,
+        0,
+        5,
+        54
+      ],
+      "vault": [
+        0,
+        54,
+        22,
+        48
+      ],
+      "saida": [
+        22,
+        54,
+        18,
+        48
+      ],
+      "sistema": [
+        0,
+        102,
+        40,
+        48
+      ]
+    },
+    "widths": [
+      36.0,
+      null,
+      null
+    ]
+  },
+  {
+    "name": "foco",
+    "action": null,
+    "rects": {
+      "sistema": [
+        0,
+        0,
+        11,
+        45
+      ],
+      "uso_claude": [
+        11,
+        0,
+        4,
+        45
+      ],
+      "uso_codex": [
+        15,
+        0,
+        5,
+        45
+      ],
+      "lembretes": [
+        20,
+        0,
+        20,
+        45
+      ],
+      "saida": [
+        0,
+        45,
+        30,
+        105
+      ],
+      "vault": [
+        30,
+        45,
+        10,
+        105
+      ]
+    },
+    "widths": [
+      30.0,
+      null
+    ]
+  },
+  {
+    "name": "foco",
+    "action": {
+      "source": "vault",
+      "column": 2,
+      "index": 0
+    },
+    "rects": {
+      "sistema": [
+        0,
+        0,
+        11,
+        45
+      ],
+      "uso_claude": [
+        11,
+        0,
+        4,
+        45
+      ],
+      "uso_codex": [
+        15,
+        0,
+        5,
+        45
+      ],
+      "lembretes": [
+        20,
+        0,
+        20,
+        45
+      ],
+      "saida": [
+        0,
+        45,
+        40,
+        52
+      ],
+      "vault": [
+        0,
+        97,
+        40,
+        53
+      ]
+    },
+    "widths": [
+      30.0,
+      null,
+      null
+    ]
+  },
+  {
+    "name": "monitor",
+    "action": null,
+    "rects": {
+      "sistema": [
+        0,
+        0,
+        11,
+        50
+      ],
+      "comandos": [
+        11,
+        0,
+        6,
+        50
+      ],
+      "portas": [
+        17,
+        0,
+        23,
+        50
+      ],
+      "vault": [
+        0,
+        50,
+        16,
+        50
+      ],
+      "agenda": [
+        16,
+        50,
+        8,
+        50
+      ],
+      "syslog": [
+        24,
+        50,
+        16,
+        50
+      ],
+      "saida": [
+        0,
+        100,
+        31,
+        50
+      ],
+      "uso_claude": [
+        31,
+        100,
+        4,
+        50
+      ],
+      "uso_codex": [
+        35,
+        100,
+        5,
+        50
+      ]
+    },
+    "widths": [
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "name": "monitor",
+    "action": {
+      "source": "vault",
+      "column": 3,
+      "index": 0
+    },
+    "rects": {
+      "sistema": [
+        0,
+        0,
+        11,
+        37
+      ],
+      "comandos": [
+        11,
+        0,
+        6,
+        37
+      ],
+      "portas": [
+        17,
+        0,
+        23,
+        37
+      ],
+      "agenda": [
+        0,
+        37,
+        13,
+        37
+      ],
+      "syslog": [
+        13,
+        37,
+        27,
+        37
+      ],
+      "saida": [
+        0,
+        74,
+        31,
+        37
+      ],
+      "uso_claude": [
+        31,
+        74,
+        4,
+        37
+      ],
+      "uso_codex": [
+        35,
+        74,
+        5,
+        37
+      ],
+      "vault": [
+        0,
+        111,
+        40,
+        39
+      ]
+    },
+    "widths": [
+      null,
+      null,
+      null,
+      null
+    ]
+  }
+]

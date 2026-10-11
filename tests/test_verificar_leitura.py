@@ -156,7 +156,7 @@ class ContratoTest(unittest.TestCase):
             self.assertTrue(vl.PROMETE[a]["criar"] and vl.PROMETE[a]["comando"], a)
 
     def test_doc_existe_e_cita_o_script(self):
-        doc = (ROOT / "docs" / "privacidade-agentes.md").read_text(encoding="utf-8")
+        doc = (ROOT / "docs" / "legacy" / "privacidade-agentes.pt-BR.md").read_text(encoding="utf-8")
         self.assertIn("scripts/verificar-leitura.py", doc)
         self.assertIn("--real", doc)
         for a in ("Claude", "Codex", "OpenCode"):

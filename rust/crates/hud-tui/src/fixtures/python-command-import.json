@@ -1,0 +1,125 @@
+{
+  "toml": "[[command]]\nname = 'item-10'\nargv = ['/usr/bin/printf', 'literal-0 $HOME; no shell']\ncwd = '/tmp'\ntimeout = 1.5\nmax_lines = 1\nconfirm = true\n[[command]]\nname = 'item-09'\nargv = ['/usr/bin/printf', 'literal-1 $HOME; no shell']\ncwd = '/tmp'\ntimeout = 2.5\nmax_lines = 2\nconfirm = true\n[[command]]\nname = 'item-08'\nargv = ['/usr/bin/printf', 'literal-2 $HOME; no shell']\ncwd = '/tmp'\ntimeout = 3.5\nmax_lines = 3\nconfirm = true\n[[command]]\nname = 'item-07'\nargv = ['/usr/bin/printf', 'literal-3 $HOME; no shell']\ncwd = '/tmp'\ntimeout = 4.5\nmax_lines = 4\nconfirm = true\n[[command]]\nname = 'item-06'\nargv = ['/usr/bin/printf', 'literal-4 $HOME; no shell']\ncwd = '/tmp'\ntimeout = 5.5\nmax_lines = 5\nconfirm = true\n[[command]]\nname = 'item-05'\nargv = ['/usr/bin/printf', 'literal-5 $HOME; no shell']\ncwd = '/tmp'\ntimeout = 6.5\nmax_lines = 6\nconfirm = true\n[[command]]\nname = 'item-04'\nargv = ['/usr/bin/printf', 'literal-6 $HOME; no shell']\ncwd = '/tmp'\ntimeout = 7.5\nmax_lines = 7\nconfirm = true\n[[command]]\nname = 'item-03'\nargv = ['/usr/bin/printf', 'literal-7 $HOME; no shell']\ncwd = '/tmp'\ntimeout = 8.5\nmax_lines = 8\nconfirm = true\n[[command]]\nname = 'item-02'\nargv = ['/usr/bin/printf', 'literal-8 $HOME; no shell']\ncwd = '/tmp'\ntimeout = 9.5\nmax_lines = 9\nconfirm = true\n[[command]]\nname = 'item-01'\nargv = ['/usr/bin/printf', 'literal-9 $HOME; no shell']\ncwd = '/tmp'\ntimeout = 10.5\nmax_lines = 10\nconfirm = true\n",
+  "commands": [
+    {
+      "key": "1",
+      "name": "item-10",
+      "argv": [
+        "/usr/bin/printf",
+        "literal-0 $HOME; no shell"
+      ],
+      "cwd": "/tmp",
+      "timeout": 1.5,
+      "max_lines": 1,
+      "confirm": true
+    },
+    {
+      "key": "2",
+      "name": "item-09",
+      "argv": [
+        "/usr/bin/printf",
+        "literal-1 $HOME; no shell"
+      ],
+      "cwd": "/tmp",
+      "timeout": 2.5,
+      "max_lines": 2,
+      "confirm": true
+    },
+    {
+      "key": "3",
+      "name": "item-08",
+      "argv": [
+        "/usr/bin/printf",
+        "literal-2 $HOME; no shell"
+      ],
+      "cwd": "/tmp",
+      "timeout": 3.5,
+      "max_lines": 3,
+      "confirm": true
+    },
+    {
+      "key": "4",
+      "name": "item-07",
+      "argv": [
+        "/usr/bin/printf",
+        "literal-3 $HOME; no shell"
+      ],
+      "cwd": "/tmp",
+      "timeout": 4.5,
+      "max_lines": 4,
+      "confirm": true
+    },
+    {
+      "key": "5",
+      "name": "item-06",
+      "argv": [
+        "/usr/bin/printf",
+        "literal-4 $HOME; no shell"
+      ],
+      "cwd": "/tmp",
+      "timeout": 5.5,
+      "max_lines": 5,
+      "confirm": true
+    },
+    {
+      "key": "6",
+      "name": "item-05",
+      "argv": [
+        "/usr/bin/printf",
+        "literal-5 $HOME; no shell"
+      ],
+      "cwd": "/tmp",
+      "timeout": 6.5,
+      "max_lines": 6,
+      "confirm": true
+    },
+    {
+      "key": "7",
+      "name": "item-04",
+      "argv": [
+        "/usr/bin/printf",
+        "literal-6 $HOME; no shell"
+      ],
+      "cwd": "/tmp",
+      "timeout": 7.5,
+      "max_lines": 7,
+      "confirm": true
+    },
+    {
+      "key": "8",
+      "name": "item-03",
+      "argv": [
+        "/usr/bin/printf",
+        "literal-7 $HOME; no shell"
+      ],
+      "cwd": "/tmp",
+      "timeout": 8.5,
+      "max_lines": 8,
+      "confirm": true
+    },
+    {
+      "key": "9",
+      "name": "item-02",
+      "argv": [
+        "/usr/bin/printf",
+        "literal-8 $HOME; no shell"
+      ],
+      "cwd": "/tmp",
+      "timeout": 9.5,
+      "max_lines": 9,
+      "confirm": true
+    },
+    {
+      "key": "0",
+      "name": "item-01",
+      "argv": [
+        "/usr/bin/printf",
+        "literal-9 $HOME; no shell"
+      ],
+      "cwd": "/tmp",
+      "timeout": 10.5,
+      "max_lines": 10,
+      "confirm": true
+    }
+  ]
+}

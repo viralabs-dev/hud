@@ -1,6 +1,6 @@
 """O roteiro de validação da tela no Windows não pode ficar desatualizado em silêncio.
 
-`docs/roteiro-windows.md` é executado à mão num Windows; aqui só se confere a
+`docs/legacy/roteiro-windows.pt-BR.md` é executado à mão num Windows; aqui só se confere a
 consistência: que ele cita cada tecla, aba e comando / que o HUD oferece hoje
 (lidos de `hud/ui.py` em tempo de execução), que os passos estão bem formados
 e que o condutor `scripts/roteiro-windows.ps1` é ASCII puro e bate com o roteiro.
@@ -17,7 +17,7 @@ except ImportError as e:  # sem curses (Windows sem windows-curses)
     raise unittest.SkipTest(f"hud.ui não importa: {e}")
 
 ROOT = Path(__file__).resolve().parent.parent
-ROTEIRO = ROOT / "docs" / "roteiro-windows.md"
+ROTEIRO = ROOT / "docs" / "legacy" / "roteiro-windows.pt-BR.md"
 CONDUTOR = ROOT / "scripts" / "roteiro-windows.ps1"
 
 # Comandos / que a ajuda cita mas são do Claude Code, não do HUD.
@@ -141,7 +141,7 @@ class Condutor(unittest.TestCase):
         self.assertTrue(all(b < 0x80 for b in self.raw))
 
     def test_le_o_roteiro(self):
-        self.assertTrue("'roteiro-windows.md'" in self.ps)
+        self.assertTrue("'roteiro-windows.pt-BR.md'" in self.ps)
 
     def test_modos_iguais_aos_do_roteiro(self):
         m = re.search(r"^\$Modos = @\(([^)]*)\)", self.ps, re.M)

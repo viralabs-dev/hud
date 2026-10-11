@@ -1,0 +1,10 @@
+[package]
+name = "hud-resources"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+[dependencies]
+serde_json = { version = "=1.0.152", features = ["preserve_order"] }
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "=1.1.5", features = ["fs", "process"] }

@@ -1,0 +1,13 @@
+[package]
+name="hud-feeds"
+version="0.1.0"
+edition="2021"
+license="MIT"
+[dependencies]
+hud-custom={path="../hud-custom"}
+hud-resources={path="../hud-resources"}
+hud-runner={path="../hud-runner"}
+hud-doc-store={path="../hud-doc-store"}
+sha2="=0.10.9"
+[target.'cfg(unix)'.dependencies]
+rustix={version="=1.1.5",features=["fs","process"]}

@@ -1,0 +1,10 @@
+[package]
+name = "hud-layout-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+hud-domain = { path = "../hud-domain" }
+hud-layout-codec = { path = "../hud-layout-codec" }
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "=1.1.5", features = ["fs", "process"] }

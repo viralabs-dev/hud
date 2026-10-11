@@ -1,0 +1,11 @@
+# Agent supervisor slice
+
+Staged crate hud-agent-process, dependency hud-agent-protocol + hud-runner; copy manifest adapting path dependencies, source/bin fake_agent and tests. Do not copy standalone Cargo.lock. Linux tested only.
+
+AgentCommand::new creates a Request through read-only protocol validation, pins explicit absolute provider executable, canonical cwd, contract version label, timeout <=600 sec. Label is caller-selected protocol release contract; it does NOT verify the installed binary's version/hash. No providers were discovered, probed, authenticated or launched. Config/profile/environment must come from trusted UI/config. Full profile returns error. Prompt+context byte cap128 KiB, protocol prompt cap20,000 chars. Secret environment fields and loader injections filtered out.
+
+supervise is blocking worker boundary, own caller Session. Uses shared Cancellation, trusted executable resolution and output sanitization, POSIX process_group, nonblocking stdin/out/err, total output1MiB, timeout/cancel kills group and reaps parent, finite drain tail300ms. Malformed JSONL counts explicit. Truncated partial final lines never parsed. Typed events sanitized before return. RateLimit JSON is data only; display code must sanitize fields. Returned events batched after process completion; real-time event streaming/queue and one-question-per-provider worker registry remain integration tasks.
+
+Supervision core derived from existing hud-runner posix core, intentionally separate process environment policy and stdin. Future extraction to shared private process core can remove duplicated supervision mechanics; don't route through ordinary configured-command safe_env/stdinNULL. Group killing does not prove containment of descendants that escape process group/session, same-UID executable replacement races remain. Windows adapter unsupported. Parser protocol details/Windows path rules/full mode/auth remain AT072 gaps.
+
+Fixtures compiled harmless fake_agent only: stdin accepted Unicode/option-like prompt, event/session/counters mapped, malformed line counted, stderr bounded, secrets absent, timeout+cancel, descendant group termination, multiMiB flood capped with no false successful final event. No system packages or personal config edits.

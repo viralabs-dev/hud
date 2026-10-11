@@ -1,0 +1,12 @@
+[package]
+name = "hud-agent-process"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+[dependencies]
+sha2 = "=0.10.9"
+hud-agent-protocol = { path = "../hud-agent-protocol" }
+hud-runner = { path = "../hud-runner" }
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "=1.1.5", features = ["fs", "process"] }

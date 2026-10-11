@@ -1,0 +1,14 @@
+[
+  {
+    "body": "---\r\nname: fixture\r\n---\r\n\tInstrução completa 日本語\r\n",
+    "request": "ação",
+    "intention": "",
+    "prompt": "[Skill fixture — siga as instruções abaixo para atender ao pedido. Arquivos auxiliares da skill ficam em /fixture/skill.]\n---\r\nname: fixture\r\n---\r\n\tInstrução completa 日本語\r\n\n[Fim da skill fixture]\n\nPedido: ação"
+  },
+  {
+    "body": "---\r\nname: fixture\r\n---\r\n\tInstrução completa 日本語\r\n",
+    "request": "",
+    "intention": "Intenção fixture",
+    "prompt": "[Skill fixture — siga as instruções abaixo para atender ao pedido. Arquivos auxiliares da skill ficam em /fixture/skill.]\n---\r\nname: fixture\r\n---\r\n\tInstrução completa 日本語\r\n\n[Fim da skill fixture]\n\nIntenção fixture\n\nPedido: (sem texto: pergunte o que o usuário quer ou mostre o que a skill faz)"
+  }
+]

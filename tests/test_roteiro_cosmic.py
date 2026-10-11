@@ -1,6 +1,6 @@
 """O roteiro de validação da tela no COSMIC Terminal não pode ficar desatualizado em silêncio.
 
-`docs/roteiro-cosmic.md` é executado à mão num desktop COSMIC; aqui só se
+O roteiro legado `docs/legacy/roteiro-cosmic.pt-BR.md` é executado à mão num desktop COSMIC; aqui só se
 confere a consistência: que ele cita cada tecla, aba e comando / que o HUD
 oferece hoje (lidos de `hud/ui.py` em tempo de execução), que os passos estão
 bem formados, que o condutor `scripts/roteiro-cosmic.sh` passa no `bash -n` e
@@ -23,7 +23,7 @@ except ImportError as e:  # sem curses (Windows sem windows-curses)
     raise unittest.SkipTest(f"hud.ui não importa: {e}")
 
 ROOT = Path(__file__).resolve().parent.parent
-ROTEIRO = ROOT / "docs" / "roteiro-cosmic.md"
+ROTEIRO = ROOT / "docs" / "legacy" / "roteiro-cosmic.pt-BR.md"
 CONDUTOR = ROOT / "scripts" / "roteiro-cosmic.sh"
 BASH = shutil.which("bash")
 
@@ -171,7 +171,7 @@ class Condutor(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_le_o_roteiro(self):
-        self.assertIn('docs/roteiro-cosmic.md"', self.sh)
+        self.assertIn('docs/legacy/roteiro-cosmic.pt-BR.md"', self.sh)
 
     def test_modos_iguais_aos_do_roteiro(self):
         m = re.search(r"^MODOS=\(([^)]*)\)", self.sh, re.M)

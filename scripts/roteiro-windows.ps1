@@ -1,4 +1,4 @@
-# Condutor do roteiro de validacao da tela no Windows (docs/roteiro-windows.md).
+# Condutor do roteiro de validacao da tela no Windows (docs/legacy/roteiro-windows.pt-BR.md).
 #
 # Prepara uma pasta de teste com dados sinteticos (config sem agentes reais,
 # Vault de exemplo com um Kanban, agenda), coleta o ambiente (hud --version,
@@ -13,7 +13,7 @@
 # Opcoes:
 #   -Hud C:\caminho\hud.exe   binario a testar (padrao: o hud do PATH)
 #   -Pasta C:\caminho         pasta de teste (padrao: %LOCALAPPDATA%\hud-roteiro)
-#   -Roteiro arquivo.md       o roteiro (padrao: ..\docs\roteiro-windows.md)
+#   -Roteiro arquivo.md       o roteiro (padrao: ..\docs\legacy\roteiro-windows.pt-BR.md)
 #   -SoPreparar               so cria a pasta de teste e mostra como abrir o HUD
 #   -Ensaio                   nao pergunta nada nem abre o HUD (teste do proprio
 #                             script; e o modo usado fora do Windows, no pwsh do
@@ -88,7 +88,7 @@ function New-Dir([string]$Caminho) {
 # ---------------------------------------------------------------- caminhos
 
 $raiz = Split-Path -Parent $PSScriptRoot
-if (-not $Roteiro) { $Roteiro = Join $raiz 'docs' 'roteiro-windows.md' }
+if (-not $Roteiro) { $Roteiro = Join (Join $raiz 'docs' 'legacy') 'roteiro-windows.pt-BR.md' }
 if (-not (Test-Path -LiteralPath $Roteiro)) { throw "roteiro nao encontrado: $Roteiro (use -Roteiro)" }
 $Roteiro = (Resolve-Path -LiteralPath $Roteiro).ProviderPath
 
@@ -393,7 +393,7 @@ function Save-Relatorio([string]$Caminho, $Ambiente, $Resultados, [int]$Total) {
     $sb = New-Object Text.StringBuilder
     [void]$sb.AppendLine((U "# Roteiro da tela no Windows \u00b7 $($Ambiente['Data']) \u00b7 $Terminal"))
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine((U 'Gerado por `scripts/roteiro-windows.ps1` a partir de `docs/roteiro-windows.md`. Dados sint\u00e9ticos, perfil simulado.'))
+    [void]$sb.AppendLine((U 'Gerado por `scripts/roteiro-windows.ps1` a partir de `docs/legacy/roteiro-windows.pt-BR.md`. Dados sint\u00e9ticos, perfil simulado.'))
     if ($Ensaio) { [void]$sb.AppendLine(''); [void]$sb.AppendLine((U '**Ensaio:** nada foi executado na tela; o relat\u00f3rio s\u00f3 prova o script.')) }
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('## Ambiente')

@@ -1,0 +1,27 @@
+[package]
+name = "hud-rs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+hud-toml = { path = "../hud-toml" }
+sha2 = "=0.10.9"
+hud-feeds = { path = "../hud-feeds" }
+hud-domain = { path = "../hud-domain" }
+ratatui.workspace = true
+crossterm.workspace = true
+hud-layout-store = { path = "../hud-layout-store" }
+hud-metrics = { path = "../hud-metrics" }
+hud-resources = { path = "../hud-resources" }
+hud-runner = { path = "../hud-runner" }
+serde_json = { version = "=1.0.152", features = ["preserve_order"] }
+hud-data = { path = "../hud-data" }
+hud-custom = { path = "../hud-custom" }
+hud-doc-store = { path = "../hud-doc-store" }
+hud-agent-process = { path = "../hud-agent-process" }
+hud-agent-protocol = { path = "../hud-agent-protocol" }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "=1.1.5", features = ["fs", "process"] }

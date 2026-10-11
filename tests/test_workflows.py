@@ -12,7 +12,7 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 WORKFLOWS = sorted((RAIZ / ".github" / "workflows").glob("*.yml"))
-DOC = RAIZ / "docs" / "actions.md"
+DOC = RAIZ / "docs" / "legacy" / "actions.pt-BR.md"
 
 USES = re.compile(r"^(?P<ind>\s*)(?:-\s+)?uses:\s*(?P<resto>.*)$")
 FIXADA = re.compile(

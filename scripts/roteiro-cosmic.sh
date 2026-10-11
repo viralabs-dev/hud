@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Condutor do roteiro de validação da tela no COSMIC Terminal (docs/roteiro-cosmic.md).
+# Condutor do roteiro de validação da tela no COSMIC Terminal (docs/legacy/roteiro-cosmic.pt-BR.md).
 #
 # Prepara uma pasta de teste com dados sintéticos (config sem agentes reais,
 # Vault de exemplo com um Kanban, agenda), coleta o ambiente (hud --version,
@@ -11,9 +11,9 @@
 # Uso:
 #   scripts/roteiro-cosmic.sh [--hud CAMINHO] [--pasta DIR] [--so-preparar] [--ensaio]
 # Opções:
-#   --hud CAMINHO   o hud a testar (padrão: o hud do PATH, senão bin/hud do repositório)
+#   --hud CAMINHO   o hud a testar (padrão: o hud-python do PATH, senão bin/hud legado do repositório)
 #   --pasta DIR     pasta de teste (padrão: $XDG_STATE_HOME/hud-roteiro-cosmic)
-#   --roteiro ARQ   o roteiro (padrão: docs/roteiro-cosmic.md do repositório)
+#   --roteiro ARQ   o roteiro (padrão: docs/legacy/roteiro-cosmic.pt-BR.md do repositório)
 #   --so-preparar   só cria a pasta de teste e mostra como abrir o HUD
 #   --ensaio        não pergunta nada nem abre janela (teste do próprio script;
 #                   não exige cosmic-term)
@@ -55,7 +55,7 @@ MODOS=(base abas)
 # ---------------------------------------------------------------- caminhos
 
 RAIZ="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-[[ -n $ROTEIRO ]] || ROTEIRO="$RAIZ/docs/roteiro-cosmic.md"
+[[ -n $ROTEIRO ]] || ROTEIRO="$RAIZ/docs/legacy/roteiro-cosmic.pt-BR.md"
 [[ -f $ROTEIRO ]] || erro "roteiro não encontrado: $ROTEIRO (use --roteiro)"
 ROTEIRO="$(readlink -f -- "$ROTEIRO")"
 
@@ -93,7 +93,7 @@ TEXTO_LONGO="$CASA/texto-longo.txt"
 declare -A CFG=([base]="$CFG_DIR/config.toml" [abas]="$CFG_DIR/config-abas.toml")
 
 if [[ -z $HUD ]]; then
-    HUD="$(command -v hud || true)"
+    HUD="$(command -v hud-python || true)"
     [[ -n $HUD ]] || HUD="$RAIZ/bin/hud"
 fi
 [[ -f $HUD && -x $HUD ]] || erro "hud não encontrado ou não executável: $HUD (use --hud)"
@@ -383,7 +383,7 @@ gravar_relatorio() {
     done
     {
         printf '# Roteiro da tela no COSMIC Terminal · %s\n\n' "${AMB_V[0]}"
-        printf 'Gerado por `scripts/roteiro-cosmic.sh` a partir de `docs/roteiro-cosmic.md`. Dados sintéticos, HOME simulado.\n'
+        printf 'Gerado por `scripts/roteiro-cosmic.sh` a partir de `docs/legacy/roteiro-cosmic.pt-BR.md`. Dados sintéticos, HOME simulado.\n'
         if (( ENSAIO )); then printf '\n**Ensaio:** nada foi executado na tela; o relatório só prova o script.\n'; fi
         printf '\n## Ambiente\n\n| Item | Valor |\n|---|---|\n'
         for i in "${!AMB_K[@]}"; do printf '| %s | %s |\n' "${AMB_K[i]}" "$(celula "${AMB_V[i]}")"; done
