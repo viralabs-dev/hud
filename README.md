@@ -2,6 +2,17 @@
 
 [Português brasileiro](README.pt-BR.md)
 
+## What it brings together
+
+HUD is a developer terminal dashboard from ViraLabs. It brings system metrics, agenda and notes, Vault queries, and reviewed agent operations into one interface.
+
+- **Current implementation:** Rust with Ratatui and Crossterm, separated into domain, data, UI and process/protocol crates.
+- **Engineering focus:** responsive terminal interaction, explicit execution permissions and controlled access to local data.
+- **Project status:** a local Linux preview, with the Python implementation retained as a fallback. Cross-platform and real-provider acceptance are still limited; see [support](rust/docs/support.en.md).
+- **Explore:** [architecture](rust/docs/architecture.en.md), [commands](rust/docs/commands-config.en.md) and [local preview](rust/docs/local-preview.en.md).
+
+## Current local preview
+
 HUD's target architecture and current local application are Rust. The primary user command is **`hud`**, selecting **0.10.0-preview.12** after the verified local cutover. System metrics, agenda/notes, Vault queries, customization and explicitly reviewed agent operations share one terminal interface. This local Linux installation is not a public release or proof of complete cross-platform acceptance.
 
 ```sh
