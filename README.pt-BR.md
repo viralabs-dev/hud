@@ -25,6 +25,10 @@ Build/checks/dependências em [workspace Rust](rust/README.pt-BR.md); [pacote lo
 
 Recibo instalado registra 392 testes e PTYs sintéticos. Terminal físico, macOS/Windows/ARM nativos, MSRV e providers/billing/isolamento reais permanecem na [matriz](rust/docs/support.pt-BR.md). Prompt real exige prova separada de auth/política/conta/isolamento; estimativa/quota não é fatura.
 
+## Apoie
+
+Se o projeto te ajuda, você pode [pagar um café no Ko-fi](https://ko-fi.com/daneiel).
+
 ## Legado e comparação
 
 Python0.18.0 preservado como **`hud-python`**, fallback/rollback explícito, sem ser runtime-alvo. [Guia EN histórico](docs/legacy/python-guide.en.md) · [manual PT original](docs/legacy/python-guide.pt-BR.md) · [inventário de referências](docs/python-reference-inventory.pt-BR.md). Fonte/testes/capturas/bridges históricos ficam separados da arquitetura ativa. Documentação não sobrescreve settings/credenciais/dados.

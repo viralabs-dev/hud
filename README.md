@@ -36,6 +36,10 @@ Build/check instructions and dependency inventory are in [Rust workspace](rust/R
 
 392 tests in the installed receipt and synthetic PTYs are local evidence. Physical terminals, native macOS/Windows/ARM, Rust MSRV and real provider/billing/filesystem-isolation gates remain in [support](rust/docs/support.en.md). Real prompts require separately reviewed auth/policy/account/isolation evidence; quota/token estimates are not invoices.
 
+## Support
+
+If this project helps you, you can [buy me a coffee on Ko-fi](https://ko-fi.com/daneiel).
+
 ## Legacy and comparison references
 
 Python0.18.0 remains preserved as **`hud-python`**, an explicit rollback/fallback rather than the target runtime. [Historical English guide](docs/legacy/python-guide.en.md) · [original Portuguese manual](docs/legacy/python-guide.pt-BR.md) · [reference inventory](docs/python-reference-inventory.en.md). Historical source, tests, screenshots and migration bridges remain distinguishable from active architecture. No original settings/credentials/data are overwritten by documentation.
